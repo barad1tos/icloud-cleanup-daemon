@@ -10,7 +10,7 @@ from typing import Any
 import yaml
 
 
-def _parse_bool(value: Any, default: bool) -> bool:
+def parse_bool(value: Any, default: bool) -> bool:
     """Parse a boolean value from config, handling string representations."""
     if value is None:
         return default
@@ -116,7 +116,7 @@ class CleanupConfig:
     @classmethod
     def _apply_recovery_config(cls, config: CleanupConfig, recovery: dict[str, Any]) -> None:
         """Apply recovery settings from config dict."""
-        config.enable_recovery = _parse_bool(recovery.get("enabled"), config.enable_recovery)
+        config.enable_recovery = parse_bool(recovery.get("enabled"), config.enable_recovery)
         if "directory" in recovery:
             config.recovery_dir = Path(os.path.expanduser(recovery["directory"]))
         config.recovery_retention_days = int(recovery.get("retention_days", config.recovery_retention_days))
