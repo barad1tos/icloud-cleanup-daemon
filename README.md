@@ -4,7 +4,7 @@
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![macOS](https://img.shields.io/badge/macOS-13+-black.svg)](https://www.apple.com/macos/)
 
-> **Platform:** macOS only. Uses macOS-specific APIs (FSEvents, launchd, `brctl`). Linux is not supported (no iCloud). Windows support is not yet implemented (different conflict patterns, requires service adaptation).
+> **Platform:** macOS only. Uses macOS-specific APIs (FSEvents, launchd, `brctl`). Linux is not supported (no iCloud). Windows support is not yet implemented (different conflict patterns require service adaptation).
 
 Automatically cleans up iCloud sync conflict files (e.g., `file 2.csv`, `file 3.csv`) on macOS.
 
