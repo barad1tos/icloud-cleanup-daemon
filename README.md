@@ -41,7 +41,7 @@ Automatically cleans up iCloud sync conflict files (e.g., `file 2.csv`, `file 3.
 
 ```bash
 # Clone the repository
-git clone https://github.com/rborodavkin/icloud-cleanup-daemon.git
+git clone https://github.com/barad1tos/icloud-cleanup-daemon.git
 cd icloud-cleanup-daemon
 
 # Install dependencies
