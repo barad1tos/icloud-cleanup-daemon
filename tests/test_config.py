@@ -34,16 +34,16 @@ class TestParseBool:
             ("", False),
         ],
     )
-    def testparse_bool_values(self, value: bool | str, expected: bool) -> None:
+    def test_parse_bool_values(self, value: bool | str, expected: bool) -> None:
         """Test parsing various boolean representations."""
         assert parse_bool(value, False) == expected
 
-    def testparse_bool_none_uses_default(self) -> None:
+    def test_parse_bool_none_uses_default(self) -> None:
         """Test that None returns the default value."""
         assert parse_bool(None, True) is True
         assert parse_bool(None, False) is False
 
-    def testparse_bool_integer(self) -> None:
+    def test_parse_bool_integer(self) -> None:
         """Test parsing integer values."""
         assert parse_bool(1, False) is True
         assert parse_bool(0, True) is False

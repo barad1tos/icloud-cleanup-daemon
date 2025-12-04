@@ -312,6 +312,26 @@ class TestScanAll:
 
         assert candidates == []
 
+    def test_scan_all_with_nonexistent_directories(
+        self, config: CleanupConfig, logger: logging.Logger, tmp_path: Path
+    ) -> None:
+        """Test scan_all skips nonexistent directories without error."""
+        existing_dir = tmp_path / "existing"
+        nonexistent_dir = tmp_path / "missing"
+        existing_dir.mkdir()
+        # nonexistent_dir is deliberately not created
+
+        (existing_dir / ".venv").mkdir()
+
+        config.watch_directories = [existing_dir, nonexistent_dir]
+        manager = NosyncManager(config, logger)
+
+        # Should not raise, should only return candidates from existing dir
+        candidates = manager.scan_all()
+
+        assert len(candidates) == 1
+        assert candidates[0].name == ".venv"
+
 
 class TestWildcardPatterns:
     """Tests for wildcard pattern matching."""

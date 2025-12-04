@@ -255,6 +255,41 @@ class TestRecoveryCleanup:
         assert not old_dir.exists()
         assert recent_dir.exists()
 
+    def test_cleanup_retention_zero_days(
+        self, config: CleanupConfig, logger: logging.Logger
+    ) -> None:
+        """When retention is 0, all dated recovery directories should be removed."""
+        config.recovery_retention_days = 0
+        cleaner = Cleaner(config, logger)
+
+        old_dir = self._create_dated_recovery_dir(config, days_ago=10, filename="old.txt")
+        recent_dir = self._create_dated_recovery_dir(config, days_ago=1, filename="recent.txt")
+
+        cleaned = cleaner.cleanup_recovery_dir()
+
+        assert cleaned == 2
+        assert not old_dir.exists()
+        assert not recent_dir.exists()
+
+    def test_cleanup_retention_one_day_boundary(
+        self, config: CleanupConfig, logger: logging.Logger
+    ) -> None:
+        """Validate 1-day retention boundary (dirs >= retention_days old are removed)."""
+        config.recovery_retention_days = 1
+        cleaner = Cleaner(config, logger)
+
+        old_dir = self._create_dated_recovery_dir(config, days_ago=2, filename="old.txt")
+        boundary_dir = self._create_dated_recovery_dir(config, days_ago=1, filename="boundary.txt")
+        new_dir = self._create_dated_recovery_dir(config, days_ago=0, filename="new.txt")
+
+        cleaned = cleaner.cleanup_recovery_dir()
+
+        # Dirs >= 1 day old are removed (old=2d, boundary=1d), today's dir survives
+        assert cleaned == 2
+        assert not old_dir.exists()
+        assert not boundary_dir.exists()
+        assert new_dir.exists()
+
     @staticmethod
     def _create_dated_recovery_dir(config: CleanupConfig, days_ago: int, filename: str) -> Path:
         """Create a dated recovery directory with a test file."""
