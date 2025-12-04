@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import Callable
 from pathlib import Path
-from typing import TYPE_CHECKING, Callable
+from typing import TYPE_CHECKING, Any
 
 from watchdog.events import FileCreatedEvent, FileMovedEvent, FileSystemEventHandler
 from watchdog.observers import Observer
@@ -47,7 +48,8 @@ class ConflictEventHandler(FileSystemEventHandler):
 
         """
         if isinstance(event, FileCreatedEvent) and not event.is_directory:
-            self._check_path(Path(event.src_path))
+            src_path = event.src_path if isinstance(event.src_path, str) else event.src_path.decode()
+            self._check_path(Path(src_path))
 
     def on_moved(self, event: FileSystemEvent) -> None:
         """Handle file move events (iCloud often moves files).
@@ -57,10 +59,11 @@ class ConflictEventHandler(FileSystemEventHandler):
 
         """
         if isinstance(event, FileMovedEvent) and not event.is_directory:
-            self._check_path(Path(event.dest_path))
+            dest_path = event.dest_path if isinstance(event.dest_path, str) else event.dest_path.decode()
+            self._check_path(Path(dest_path))
 
     def _check_path(self, path: Path) -> None:
-        """Check if path is a conflict file.
+        """Check if the path is a conflict file.
 
         Args:
             path: Path to check.
@@ -91,7 +94,7 @@ class FileWatcher:
         self.config = config
         self.detector = detector
         self.logger = logger
-        self._observer: Observer | None = None
+        self._observer: Any = None
         self._pending_conflicts: asyncio.Queue[Path] = asyncio.Queue()
         self._running = False
 
@@ -141,29 +144,17 @@ class FileWatcher:
 
     @property
     def is_running(self) -> bool:
-        """Check if watcher is running."""
+        """Check if the watcher is running."""
         return self._running
 
-    async def get_pending_conflict(self, timeout: float | None = None) -> Path | None:
+    async def get_pending_conflict(self) -> Path:
         """Get a pending conflict file from the queue.
 
-        Args:
-            timeout: Maximum time to wait for a conflict.
-
         Returns:
-            Path to conflict file, or None if timeout.
+            Path to conflict file.
 
         """
-        try:
-            if timeout is not None:
-                return await asyncio.wait_for(
-                    self._pending_conflicts.get(),
-                    timeout=timeout,
-                )
-            else:
-                return await self._pending_conflicts.get()
-        except asyncio.TimeoutError:
-            return None
+        return await self._pending_conflicts.get()
 
     def clear_pending(self) -> int:
         """Clear all pending conflicts.

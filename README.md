@@ -1,131 +1,233 @@
 # iCloud Cleanup Daemon
 
-Automatically cleans up iCloud sync conflict files (e.g., `file 2.csv`, `file 3.csv`).
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
+[![macOS](https://img.shields.io/badge/macOS-13+-black.svg)](https://www.apple.com/macos/)
+
+Automatically cleans up iCloud sync conflict files (e.g., `file 2.csv`, `file 3.csv`) on macOS.
+
+## Table of Contents
+
+- [Features](#features)
+- [Installation](#installation)
+- [Quick Start](#quick-start)
+- [Usage](#usage)
+- [Running as a Service](#running-as-a-service)
+- [Configuration](#configuration)
+- [How It Works](#how-it-works)
+- [Safety](#safety)
+- [Contributing](#contributing)
+- [License](#license)
 
 ## Features
 
-- **FSEvents Monitoring**: Real-time detection of new conflict files using macOS FSEvents
-- **iCloud Sync Awareness**: Waits for iCloud to finish syncing before deleting
-- **7-Day Recovery**: Deleted files are moved to trash with 7-day retention
-- **Configurable Whitelist**: Choose which directories to monitor
-- **Low Resource Usage**: Runs as a background daemon with minimal CPU/IO impact
+- **Real-time Monitoring** — Detects new conflict files using macOS FSEvents
+- **iCloud Aware** — Waits for iCloud to finish syncing before deletion
+- **Smart Detection** — Only deletes true conflicts (verifies original file exists)
+- **Safe by Default** — 7-day recovery period, protected system paths, dry-run mode
+- **Unicode Support** — Works with filenames in any language
+- **Low Resource Usage** — Runs as a background daemon with minimal impact
+- **Makefile Workflow** — Simple commands for common operations
 
 ## Installation
 
-```bash
-cd /Users/cloud/Developer/icloud-cleanup-daemon
+### Requirements
 
-# Create virtual environment
-python3 -m venv .venv
-source .venv/bin/activate
+- macOS 13+ (Ventura or later)
+- Python 3.11+
+- [uv](https://github.com/astral-sh/uv) (recommended) or pip
+
+### Install
+
+```bash
+# Clone the repository
+git clone https://github.com/rborodavkin/icloud-cleanup-daemon.git
+cd icloud-cleanup-daemon
 
 # Install dependencies
-pip install -e .
+make setup
+```
 
-# Or with uv
-uv sync
+<details>
+<summary>Alternative: Install with pip</summary>
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -e .
+```
+</details>
+
+## Quick Start
+
+```bash
+# 1. Preview what would be deleted (safe, no changes)
+make dry-run
+
+# 2. Run cleanup once
+make once
+
+# 3. Install as auto-starting service
+make install
+make start
 ```
 
 ## Usage
 
-### Quick Scan (No Deletion)
+### Using Make (Recommended)
 
 ```bash
-# Scan all iCloud directories
+make help          # Show all commands
+
+# Development
+make dry-run       # Preview deletions (no changes)
+make scan          # Scan for conflicts
+make once          # Run cleanup once
+make run           # Run in foreground
+
+# Service Management
+make install       # Install launchd service
+make start         # Start service
+make stop          # Stop service
+make status        # Check service status
+make logs          # Tail logs
+```
+
+### Using CLI Directly
+
+```bash
+# Scan for conflicts
 icloud-cleanup scan
+icloud-cleanup scan --dir ~/Documents
 
-# Scan specific directory
-icloud-cleanup scan --dir ~/Library/Mobile\ Documents/com~apple~CloudDocs/
+# Run cleanup
+icloud-cleanup run --dry-run    # Preview only
+icloud-cleanup run --once       # Run once
+icloud-cleanup run              # Run as daemon
+
+# Configuration
+icloud-cleanup config --init    # Create config
+icloud-cleanup config --show    # Show config
+
+# Recovery
+icloud-cleanup recovery --list
+icloud-cleanup recovery --restore /path/to/file
 ```
 
-### One-Time Cleanup
+## Running as a Service
+
+The daemon can run automatically on login using macOS launchd:
 
 ```bash
-# Run once and exit
-icloud-cleanup run --once
+# Install and start
+make install
+make start
+
+# Check status
+make status
+
+# View logs
+make logs
+
+# Stop and uninstall
+make stop
+make uninstall
 ```
 
-### Run as Daemon
+## Configuration
 
-```bash
-# Run continuously
-icloud-cleanup run
-```
-
-### Configuration
+Configuration file: `~/Library/Application Support/icloud-cleanup/config.yaml`
 
 ```bash
 # Create default config
-icloud-cleanup config --init
+make config-init
 
-# Show current config
-icloud-cleanup config --show
+# View current config
+make config
 ```
 
-Configuration file location: `~/Library/Application Support/icloud-cleanup/config.yaml`
+### Options
 
-### Recovery
-
-```bash
-# List recoverable files
-icloud-cleanup recovery --list
-
-# Restore a file
-icloud-cleanup recovery --restore /path/to/recovery/file
-
-# Clean up expired recoveries
-icloud-cleanup recovery --cleanup
-```
-
-## Install as launchd Service
-
-```bash
-# Copy plist to LaunchAgents
-cp launchd/com.cloud.icloud-cleanup.plist ~/Library/LaunchAgents/
-
-# Load the daemon
-launchctl load ~/Library/LaunchAgents/com.cloud.icloud-cleanup.plist
-
-# Check status
-launchctl list | grep icloud-cleanup
-
-# View logs
-tail -f ~/Library/Logs/icloud-cleanup-daemon.log
-```
-
-### Uninstall
-
-```bash
-# Unload daemon
-launchctl unload ~/Library/LaunchAgents/com.cloud.icloud-cleanup.plist
-
-# Remove plist
-rm ~/Library/LaunchAgents/com.cloud.icloud-cleanup.plist
-```
-
-## Configuration Options
-
-| Option | Default | Description |
-|--------|---------|-------------|
-| `watch_directories` | iCloud Drive | Directories to monitor |
-| `wait_before_delete` | 180s | Wait time before deleting (allows iCloud to sync) |
-| `recovery.enabled` | true | Move to trash instead of permanent delete |
-| `recovery.retention_days` | 7 | Days to keep deleted files |
-| `scan_interval` | 60s | Interval between full directory scans |
+| Option                    | Default      | Description                     |
+|---------------------------|--------------|---------------------------------|
+| `watch_directories`       | iCloud Drive | Directories to monitor          |
+| `wait_before_delete`      | 180s         | Wait time before deleting       |
+| `recovery.enabled`        | true         | Move to trash instead of delete |
+| `recovery.retention_days` | 7            | Days to keep deleted files      |
+| `scan_interval`           | 60s          | Interval between full scans     |
 
 ## How It Works
 
-1. **Detection**: Monitors configured directories for files matching pattern `filename N.ext` where N is a number ≥ 2
-2. **Verification**: Checks if the original file (`filename.ext`) exists
-3. **Sync Check**: Waits for iCloud to finish syncing the file
-4. **Cleanup**: Moves conflict to recovery directory (or deletes if recovery disabled)
-5. **Recovery Cleanup**: Automatically removes recovered files older than retention period
+```
+1. Detection    →  Find files matching "filename N.ext" (N ≥ 2)
+2. Verification →  Check if "filename.ext" exists (prevents false positives)
+3. Safety Check →  Ensure file is not in protected directory
+4. Sync Check   →  Wait for iCloud to finish syncing
+5. Cleanup      →  Move to recovery directory
+6. Retention    →  Auto-delete after 7 days
+```
 
-## Logs
+### What IS a Conflict
 
-- **Daemon log**: `~/Library/Logs/icloud-cleanup-daemon.log`
-- **stdout/stderr**: `~/Library/Logs/icloud-cleanup-daemon-{stdout,stderr}.log`
+| File             | Original              | Conflict? |
+|------------------|-----------------------|-----------|
+| `document 2.txt` | `document.txt` exists | ✅ Yes    |
+| `photo 3.jpg`    | `photo.jpg` exists    | ✅ Yes    |
+
+### What is NOT a Conflict
+
+| File             | Why Not                                  |
+|------------------|------------------------------------------|
+| `April 2025.pdf` | No `April.pdf` exists — it's a date      |
+| `vSphere 6.pdf`  | No `vSphere.pdf` exists — it's a version |
+| `Том 2.fb2`      | No `Том.fb2` exists — it's a book volume |
+
+## Safety
+
+Multiple safety mechanisms protect your files:
+
+| Safety Feature      | Description                                                   |
+|---------------------|---------------------------------------------------------------|
+| **Recovery Mode**   | Files moved to `~/.icloud-cleanup-trash/` (not deleted)       |
+| **7-Day Retention** | Recover accidentally deleted files                            |
+| **Original Check**  | Only delete when original file exists                         |
+| **Protected Paths** | System directories blocked (`/System`, `/Applications`, etc.) |
+| **Dry-Run Mode**    | Preview changes with `--dry-run`                              |
+| **iCloud Sync**     | Wait for sync completion before deletion                      |
+
+### Logs
+
+```bash
+# View all logs
+make logs
+
+# View errors only
+make logs-error
+```
+
+Log locations:
+- `~/Library/Logs/icloud-cleanup-daemon.log`
+- `~/Library/Logs/icloud-cleanup-daemon-stdout.log`
+- `~/Library/Logs/icloud-cleanup-daemon-stderr.log`
+
+## Contributing
+
+Contributions are welcome! Please read our [Contributing Guide](CONTRIBUTING.md) and [Code of Conduct](CODE_OF_CONDUCT.md).
+
+```bash
+# Development setup
+make setup
+make test
+
+# Before submitting PR
+make check  # Runs lint + typecheck + tests
+```
 
 ## License
 
-MIT
+This project is licensed under the MIT License — see the [LICENSE](LICENSE) file for details.
+
+---
+<p align="center">
+*Made with some hate to iCloud sync conflicts.* ❤️
+</p>

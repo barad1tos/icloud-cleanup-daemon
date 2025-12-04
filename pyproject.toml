@@ -3,7 +3,7 @@ name = "icloud-cleanup-daemon"
 version = "1.0.0"
 description = "Daemon for cleaning up iCloud sync conflict files (e.g., 'file 2.csv', 'file 3.csv')"
 authors = [{ name = "cloud" }]
-requires-python = ">=3.12"
+requires-python = ">=3.12,<3.14"
 readme = "README.md"
 license = { text = "MIT" }
 
@@ -11,6 +11,11 @@ dependencies = [
     "watchdog>=4.0.0",
     "pyyaml>=6.0",
     "rich>=13.0",
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    "ruff>=0.4",
+    "mypy>=1.10",
+    "types-pyyaml>=6.0",
 ]
 
 [project.optional-dependencies]
@@ -36,6 +41,9 @@ python_version = "3.12"
 strict = true
 warn_return_any = true
 warn_unused_ignores = true
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/icloud_cleanup"]
 
 [build-system]
 requires = ["hatchling"]

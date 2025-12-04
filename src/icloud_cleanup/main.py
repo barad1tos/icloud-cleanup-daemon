@@ -4,14 +4,19 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import logging
 import sys
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from rich.console import Console
 from rich.table import Table
 
 from .config import CleanupConfig
 from .daemon import ICloudCleanupDaemon
+
+if TYPE_CHECKING:
+    from .cleaner import Cleaner
 
 
 def parse_args() -> argparse.Namespace:
@@ -42,6 +47,11 @@ def parse_args() -> argparse.Namespace:
         "--once",
         action="store_true",
         help="Run once and exit instead of continuous daemon mode",
+    )
+    run_parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Show what would be deleted without actually deleting",
     )
 
     # Scan command
@@ -87,10 +97,33 @@ def parse_args() -> argparse.Namespace:
         help="Clean up expired recovery files",
     )
 
+    # Nosync command
+    nosync_parser = subparsers.add_parser(
+        "nosync",
+        help="Exclude directories from iCloud sync (.venv, node_modules, etc.)",
+    )
+    nosync_parser.add_argument(
+        "--scan",
+        action="store_true",
+        help="Scan for directories that should be excluded",
+    )
+    nosync_parser.add_argument(
+        "--apply",
+        action="store_true",
+        help="Convert directories to .nosync format",
+    )
+    nosync_parser.add_argument(
+        "--dir",
+        "-d",
+        type=Path,
+        default=None,
+        help="Specific directory to process",
+    )
+
     return parser.parse_args()
 
 
-def cmd_scan(config: CleanupConfig, args: argparse.Namespace) -> int:
+def cmd_scan(config: CleanupConfig, args: argparse.Namespace) -> int:  # NOSONAR
     """Execute scan command.
 
     Args:
@@ -106,21 +139,22 @@ def cmd_scan(config: CleanupConfig, args: argparse.Namespace) -> int:
     console = Console()
     detector = ConflictDetector(config)
 
-    if args.dir:
-        conflicts = detector.scan_directory(args.dir)
-    else:
-        conflicts = detector.scan_all()
+    conflicts = detector.scan_directory(args.dir) if args.dir else detector.scan_all()
 
     if not conflicts:
         console.print("[green]No conflict files found[/green]")
         return 0
 
-    table = Table(title=f"Found {len(conflicts)} conflict files")
+    # Filter to only real conflicts (where the original exists)
+    real_conflicts = [c for c in conflicts if c.original_path.exists()]
+    false_positives = len(conflicts) - len(real_conflicts)
+
+    table = Table(title=f"Found {len(real_conflicts)} conflict files")
     table.add_column("Conflict File", style="red")
     table.add_column("Original", style="green")
     table.add_column("Location", style="dim")
 
-    for conflict in conflicts:
+    for conflict in real_conflicts:
         table.add_row(
             conflict.path.name,
             conflict.original_path.name,
@@ -128,6 +162,13 @@ def cmd_scan(config: CleanupConfig, args: argparse.Namespace) -> int:
         )
 
     console.print(table)
+
+    if false_positives > 0:
+        console.print(
+            f"\n[dim]Filtered out {false_positives} files where original doesn't exist "
+            "(likely not iCloud conflicts)[/dim]"
+        )
+
     return 0
 
 
@@ -154,23 +195,28 @@ def cmd_config(config: CleanupConfig, args: argparse.Namespace) -> int:
         return 0
 
     if args.show:
-        table = Table(title="Current Configuration")
-        table.add_column("Setting", style="cyan")
-        table.add_column("Value", style="green")
-
-        table.add_row("Watch directories", "\n".join(str(d) for d in config.watch_directories))
-        table.add_row("Wait before delete", f"{config.wait_before_delete}s")
-        table.add_row("Recovery enabled", str(config.enable_recovery))
-        table.add_row("Recovery directory", str(config.recovery_dir))
-        table.add_row("Retention days", str(config.recovery_retention_days))
-        table.add_row("Log file", str(config.log_file))
-        table.add_row("Log level", config.log_level)
-
-        console.print(table)
-        return 0
+        return _print_config(config, console)
 
     console.print("[yellow]Use --init or --show[/yellow]")
     return 1
+
+
+def _print_config(config: CleanupConfig, console: Console) -> int:  # NOSONAR
+    """Print the current configuration as a table."""
+    table = Table(title="Current Configuration")
+    table.add_column("Setting", style="cyan")
+    table.add_column("Value", style="green")
+
+    table.add_row("Watch directories", "\n".join(str(d) for d in config.watch_directories))
+    table.add_row("Wait before delete", f"{config.wait_before_delete}s")
+    table.add_row("Recovery enabled", str(config.enable_recovery))
+    table.add_row("Recovery directory", str(config.recovery_dir))
+    table.add_row("Retention days", str(config.recovery_retention_days))
+    table.add_row("Log file", str(config.log_file))
+    table.add_row("Log level", config.log_level)
+
+    console.print(table)
+    return 0
 
 
 def cmd_recovery(config: CleanupConfig, args: argparse.Namespace) -> int:
@@ -184,8 +230,6 @@ def cmd_recovery(config: CleanupConfig, args: argparse.Namespace) -> int:
         Exit code.
 
     """
-    import logging
-
     from .cleaner import Cleaner
 
     console = Console()
@@ -193,26 +237,7 @@ def cmd_recovery(config: CleanupConfig, args: argparse.Namespace) -> int:
     cleaner = Cleaner(config, logger)
 
     if args.list_files:
-        files = cleaner.list_recoverable_files()
-        if not files:
-            console.print("[green]No recoverable files[/green]")
-            return 0
-
-        table = Table(title=f"Recoverable files ({len(files)})")
-        table.add_column("File", style="cyan")
-        table.add_column("Deleted", style="dim")
-        table.add_column("Path", style="dim")
-
-        for path, date in files:
-            table.add_row(
-                path.name,
-                date.strftime("%Y-%m-%d"),
-                str(path),
-            )
-
-        console.print(table)
-        return 0
-
+        return _list_recovery_files(cleaner, console)
     if args.restore:
         if cleaner.restore_file(args.restore):
             console.print(f"[green]Restored: {args.restore.name}[/green]")
@@ -229,7 +254,30 @@ def cmd_recovery(config: CleanupConfig, args: argparse.Namespace) -> int:
     return 1
 
 
-def cmd_run(config: CleanupConfig, args: argparse.Namespace) -> int:
+def _list_recovery_files(cleaner: Cleaner, console: Console) -> int:  # NOSONAR
+    """List recoverable files as a table."""
+    files = cleaner.list_recoverable_files()
+    if not files:
+        console.print("[green]No recoverable files[/green]")
+        return 0
+
+    table = Table(title=f"Recoverable files ({len(files)})")
+    table.add_column("File", style="cyan")
+    table.add_column("Deleted", style="dim")
+    table.add_column("Path", style="dim")
+
+    for path, date in files:
+        table.add_row(
+            path.name,
+            date.strftime("%Y-%m-%d"),
+            str(path),
+        )
+
+    console.print(table)
+    return 0
+
+
+def cmd_run(config: CleanupConfig, args: argparse.Namespace) -> int:  # NOSONAR
     """Execute run command.
 
     Args:
@@ -240,15 +288,117 @@ def cmd_run(config: CleanupConfig, args: argparse.Namespace) -> int:
         Exit code.
 
     """
+    # Handle dry-run mode
+    if getattr(args, "dry_run", False):
+        return _dry_run(config)
+
     daemon = ICloudCleanupDaemon(config)
 
     if args.once:
         results = asyncio.run(daemon.run_once())
-        success = sum(1 for r in results if r.success)
+        success = sum(bool(r.success) for r in results)
         print(f"Processed {len(results)} conflicts, {success} successful")
         return 0
 
     asyncio.run(daemon.run_daemon())
+    return 0
+
+
+def _dry_run(config: CleanupConfig) -> int:
+    """Show what would be deleted without actually deleting."""
+    from .detector import ConflictDetector
+
+    console = Console()
+    detector = ConflictDetector(config)
+
+    console.print("\n[bold yellow]🔍 DRY RUN MODE - No files will be deleted[/bold yellow]\n")
+    console.print(f"[dim]Watch directories: {', '.join(str(d) for d in config.watch_directories)}[/dim]")
+    console.print(f"[dim]Recovery enabled: {config.enable_recovery}[/dim]")
+    console.print(f"[dim]Wait before delete: {config.wait_before_delete}s[/dim]\n")
+
+    conflicts = detector.scan_all()
+
+    if not conflicts:
+        console.print("[green]✅ No conflict files found[/green]")
+        return 0
+
+    table = Table(title=f"Would process {len(conflicts)} conflict files")
+    table.add_column("Action", style="yellow")
+    table.add_column("Conflict File", style="red")
+    table.add_column("Original File", style="green")
+    table.add_column("Original Exists", style="cyan")
+
+    for conflict in conflicts:
+        action = "MOVE to recovery" if config.enable_recovery else "DELETE"
+        original_exists = "✅ Yes" if conflict.original_path.exists() else "❌ No (SKIP)"
+        table.add_row(
+            action,
+            conflict.path.name,
+            conflict.original_path.name,
+            original_exists,
+        )
+
+    console.print(table)
+    console.print("\n[bold]To actually run, remove --dry-run flag[/bold]")
+    return 0
+
+
+def cmd_nosync(config: CleanupConfig, args: argparse.Namespace) -> int:
+    """Execute nosync command.
+
+    Args:
+        config: Cleanup configuration.
+        args: Parsed arguments.
+
+    Returns:
+        Exit code.
+
+    """
+    from .nosync import NosyncManager
+
+    console = Console()
+    logger = logging.getLogger("icloud-cleanup")
+    manager = NosyncManager(config, logger)
+
+    # Determine directories to scan
+    candidates = manager.scan_for_candidates(args.dir) if args.dir else manager.scan_all()
+
+    if not candidates:
+        console.print("[green]No directories need to be excluded from iCloud sync[/green]")
+        return 0
+
+    if args.scan or not args.apply:
+        return _print_nosync_candidates(candidates, console, args)
+    console.print(f"\n[bold]Converting {len(candidates)} directories to .nosync...[/bold]\n")
+
+    success_count = 0
+    for path in candidates:
+        result = manager.convert_to_nosync(path)
+        if result.success:
+            console.print(f"[green]✓[/green] {path.name} -> {path.name}.nosync")
+            success_count += 1
+        else:
+            console.print(f"[red]✗[/red] {path.name}: {result.error}")
+
+    console.print(f"\n[bold]Converted {success_count}/{len(candidates)} directories[/bold]")
+    return 0
+
+
+def _print_nosync_candidates(
+    candidates: list[Path], console: Console, args: argparse.Namespace
+) -> int:
+    """Print table of nosync candidates."""
+    table = Table(title=f"Found {len(candidates)} directories to exclude")
+    table.add_column("Directory", style="yellow")
+    table.add_column("Location", style="dim")
+
+    for path in candidates:
+        table.add_row(path.name, str(path.parent))
+
+    console.print(table)
+
+    if not args.apply:
+        console.print("\n[bold]To convert, run with --apply flag[/bold]")
     return 0
 
 
@@ -271,6 +421,8 @@ def main() -> int:
         return cmd_config(config, args)
     elif command == "recovery":
         return cmd_recovery(config, args)
+    elif command == "nosync":
+        return cmd_nosync(config, args)
     elif command == "run":
         return cmd_run(config, args)
     else:

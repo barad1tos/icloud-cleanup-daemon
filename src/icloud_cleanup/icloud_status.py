@@ -46,7 +46,8 @@ class ICloudStatusChecker:
         """
         self.config = config
 
-    def get_file_status(self, path: Path) -> FileStatus:
+    @staticmethod
+    def get_file_status(path: Path) -> FileStatus:
         """Get the sync status of a file.
 
         Uses xattr to check iCloud extended attributes.
@@ -77,14 +78,16 @@ class ICloudStatusChecker:
                 )
 
             # Use xattr to check com.apple.icloud attributes
+            # Note: Don't use text=True because xattr output may contain
+            # binary data that isn't valid UTF-8
             result = subprocess.run(
                 ["xattr", "-l", str(path)],
                 capture_output=True,
-                text=True,
                 check=False,
             )
 
-            xattrs = result.stdout
+            # Decode with error handling for binary xattr values
+            xattrs = result.stdout.decode("utf-8", errors="replace")
 
             # Check for various iCloud attributes
             is_placeholder = "com.apple.icloud.itemDownloadPending" in xattrs
@@ -136,17 +139,20 @@ class ICloudStatusChecker:
 
         """
         elapsed = 0
+        # Ensure minimum poll interval to prevent infinite loop
+        poll_interval = max(self.config.icloud_poll_interval, 1)
 
         while elapsed < self.config.max_icloud_wait:
             if self.is_synced(path):
                 return True
 
-            await asyncio.sleep(self.config.icloud_poll_interval)
-            elapsed += self.config.icloud_poll_interval
+            await asyncio.sleep(poll_interval)
+            elapsed += poll_interval
 
         return False
 
-    def get_icloud_drive_status(self) -> dict[str, str]:
+    @staticmethod
+    def get_icloud_drive_status() -> dict[str, str]:
         """Get overall iCloud Drive sync status using brctl.
 
         Returns:

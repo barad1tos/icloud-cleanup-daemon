@@ -10,6 +10,17 @@ from typing import Any
 import yaml
 
 
+def _parse_bool(value: Any, default: bool) -> bool:
+    """Parse a boolean value from config, handling string representations."""
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.lower() in ("true", "yes", "on", "1")
+    return bool(value)
+
+
 @dataclass
 class CleanupConfig:
     """Configuration for the iCloud cleanup daemon."""
@@ -19,7 +30,8 @@ class CleanupConfig:
 
     # File patterns to match as conflicts (regex)
     # Default: matches "filename 2.ext", "filename 3.ext", etc.
-    conflict_pattern: str = r"^(.+)\s+(\d+)(\.[^.]+)?$"
+    # iCloud conflict numbers start at 2, not 1
+    conflict_pattern: str = r"^(.+)\s+([2-9]|\d{2,})(\.[^.]+)?$"
 
     # Wait time before deleting (seconds) - allows iCloud to finish syncing
     wait_before_delete: int = 180  # 3 minutes
@@ -54,7 +66,8 @@ class CleanupConfig:
         """Load configuration from YAML file.
 
         Args:
-            config_path: Path to config file. Uses default if None.
+            config_path: Path to config file.
+            Use default if None.
 
         Returns:
             Loaded configuration.
@@ -80,44 +93,40 @@ class CleanupConfig:
         config = cls()
 
         # Watch directories
-        if "watch_directories" in data:
-            config.watch_directories = [
-                Path(os.path.expanduser(p)) for p in data["watch_directories"]
-            ]
-        else:
-            config.watch_directories = cls._get_default_watch_directories()
+        watch_dirs = data.get("watch_directories")
+        config.watch_directories = (
+            [Path(os.path.expanduser(p)) for p in watch_dirs]
+            if watch_dirs is not None
+            else cls._get_default_watch_directories()
+        )
 
-        # Simple fields
-        if "conflict_pattern" in data:
-            config.conflict_pattern = data["conflict_pattern"]
-        if "wait_before_delete" in data:
-            config.wait_before_delete = int(data["wait_before_delete"])
-        if "icloud_poll_interval" in data:
-            config.icloud_poll_interval = int(data["icloud_poll_interval"])
-        if "max_icloud_wait" in data:
-            config.max_icloud_wait = int(data["max_icloud_wait"])
-        if "scan_interval" in data:
-            config.scan_interval = int(data["scan_interval"])
+        # Simple scalar fields
+        config.conflict_pattern = data.get("conflict_pattern", config.conflict_pattern)
+        config.wait_before_delete = int(data.get("wait_before_delete", config.wait_before_delete))
+        config.icloud_poll_interval = int(data.get("icloud_poll_interval", config.icloud_poll_interval))
+        config.max_icloud_wait = int(data.get("max_icloud_wait", config.max_icloud_wait))
+        config.scan_interval = int(data.get("scan_interval", config.scan_interval))
 
-        # Recovery settings
-        if "recovery" in data:
-            recovery = data["recovery"]
-            if "enabled" in recovery:
-                config.enable_recovery = bool(recovery["enabled"])
-            if "directory" in recovery:
-                config.recovery_dir = Path(os.path.expanduser(recovery["directory"]))
-            if "retention_days" in recovery:
-                config.recovery_retention_days = int(recovery["retention_days"])
-
-        # Logging
-        if "logging" in data:
-            logging_cfg = data["logging"]
-            if "file" in logging_cfg:
-                config.log_file = Path(os.path.expanduser(logging_cfg["file"]))
-            if "level" in logging_cfg:
-                config.log_level = logging_cfg["level"]
+        # Nested sections
+        cls._apply_recovery_config(config, data.get("recovery", {}))
+        cls._apply_logging_config(config, data.get("logging", {}))
 
         return config
+
+    @classmethod
+    def _apply_recovery_config(cls, config: CleanupConfig, recovery: dict[str, Any]) -> None:
+        """Apply recovery settings from config dict."""
+        config.enable_recovery = _parse_bool(recovery.get("enabled"), config.enable_recovery)
+        if "directory" in recovery:
+            config.recovery_dir = Path(os.path.expanduser(recovery["directory"]))
+        config.recovery_retention_days = int(recovery.get("retention_days", config.recovery_retention_days))
+
+    @classmethod
+    def _apply_logging_config(cls, config: CleanupConfig, logging_cfg: dict[str, Any]) -> None:
+        """Apply logging settings from config dict."""
+        if "file" in logging_cfg:
+            config.log_file = Path(os.path.expanduser(logging_cfg["file"]))
+        config.log_level = logging_cfg.get("level", config.log_level)
 
     @classmethod
     def _get_default_watch_directories(cls) -> list[Path]:
@@ -137,7 +146,8 @@ class CleanupConfig:
         """Save configuration to YAML file.
 
         Args:
-            config_path: Path to save config. Uses default if None.
+            config_path: Path to save config.
+            Use default if None.
 
         """
         if config_path is None:

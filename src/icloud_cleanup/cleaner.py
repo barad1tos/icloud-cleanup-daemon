@@ -1,7 +1,9 @@
 """Cleanup logic for iCloud conflict files with recovery support."""
 
+
 from __future__ import annotations
 
+import contextlib
 import logging
 import shutil
 from dataclasses import dataclass
@@ -28,6 +30,19 @@ class CleanupResult:
 class Cleaner:
     """Cleans up iCloud conflict files with optional recovery."""
 
+    # Directories that should never be cleaned
+    PROTECTED_PATHS: frozenset[str] = frozenset({
+        "/",
+        "/System",
+        "/Applications",
+        "/Library",
+        "/usr",
+        "/bin",
+        "/sbin",
+        "/var",
+        "/private",
+    })
+
     def __init__(self, config: CleanupConfig, logger: logging.Logger) -> None:
         """Initialize the cleaner.
 
@@ -39,6 +54,30 @@ class Cleaner:
         self.config = config
         self.logger = logger
         self._ensure_recovery_dir()
+
+    def is_path_protected(self, path: Path) -> bool:
+        """Check if a path is in a protected directory.
+
+        Args:
+            path: Path to check.
+
+        Returns:
+            True if the path is protected and should not be deleted.
+
+        """
+        resolved = path.resolve()
+        resolved_str = str(resolved)
+        home_str = str(Path.home())
+
+        return next(
+            (
+                not resolved_str.startswith(home_str)
+                for protected in self.PROTECTED_PATHS
+                if resolved_str.startswith(f"{protected}/")
+                or resolved_str == protected
+            ),
+            False,
+        )
 
     def _ensure_recovery_dir(self) -> None:
         """Ensure the recovery directory exists."""
@@ -62,9 +101,18 @@ class Cleaner:
 
         # Include parent directory info to avoid collisions
         parent_hash = hex(hash(str(conflict.path.parent)))[-6:]
-        filename = f"{parent_hash}_{conflict.path.name}"
+        base_filename = f"{parent_hash}_{conflict.path.name}"
+        recovery_path = recovery_subdir / base_filename
 
-        return recovery_subdir / filename
+        # Handle collision if file already exists (same file processed twice)
+        counter = 1
+        while recovery_path.exists():
+            stem = conflict.path.stem
+            suffix = conflict.path.suffix
+            recovery_path = recovery_subdir / f"{parent_hash}_{stem}_{counter}{suffix}"
+            counter += 1
+
+        return recovery_path
 
     def delete_conflict(self, conflict: ConflictFile, *, force: bool = False) -> CleanupResult:
         """Delete a conflict file, optionally moving to recovery.
@@ -85,6 +133,15 @@ class Cleaner:
                 success=False,
                 action="skipped",
                 error="File no longer exists",
+            )
+
+        if self.is_path_protected(path):
+            self.logger.warning("Refusing to delete protected path: %s", path)
+            return CleanupResult(
+                path=path,
+                success=False,
+                action="skipped",
+                error="Path is in protected directory",
             )
 
         try:
@@ -162,7 +219,7 @@ class Cleaner:
                     continue
 
                 if dir_date < cutoff:
-                    # Remove entire directory
+                    # Remove the entire directory
                     shutil.rmtree(date_dir)
                     self.logger.info("Removed expired recovery directory: %s", date_dir.name)
                     cleaned += 1
@@ -180,7 +237,7 @@ class Cleaner:
             destination: Where to restore. If None, attempts to restore to original location.
 
         Returns:
-            True if restoration successful.
+            True if restoration is successful.
 
         """
         if not recovery_path.exists():
@@ -190,10 +247,7 @@ class Cleaner:
         if destination is None:
             # Extract original filename (remove hash prefix)
             parts = recovery_path.name.split("_", 1)
-            if len(parts) > 1:
-                original_name = parts[1]
-            else:
-                original_name = recovery_path.name
+            original_name = parts[1] if len(parts) > 1 else recovery_path.name
 
             # Default to home directory
             destination = Path.home() / "Desktop" / "Restored" / original_name
@@ -208,7 +262,7 @@ class Cleaner:
             return False
 
     def list_recoverable_files(self) -> list[tuple[Path, datetime]]:
-        """List all files in recovery directory.
+        """List all files in the recovery directory.
 
         Returns:
             List of (path, date) tuples for recoverable files.
@@ -219,7 +273,7 @@ class Cleaner:
         if not self.config.recovery_dir.exists():
             return files
 
-        try:
+        with contextlib.suppress(OSError):
             for date_dir in self.config.recovery_dir.iterdir():
                 if not date_dir.is_dir():
                     continue
@@ -229,11 +283,9 @@ class Cleaner:
                 except ValueError:
                     continue
 
-                for file_path in date_dir.iterdir():
-                    if file_path.is_file():
-                        files.append((file_path, dir_date))
-
-        except OSError:
-            pass
-
+                files.extend(
+                    (file_path, dir_date)
+                    for file_path in date_dir.iterdir()
+                    if file_path.is_file()
+                )
         return sorted(files, key=lambda x: x[1], reverse=True)

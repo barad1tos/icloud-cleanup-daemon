@@ -30,7 +30,13 @@ class TestConflictPattern:
             ("document 3.txt", "document", 3),
             ("my file 2.csv", "my file", 2),
             ("pending_year_verification 5.csv", "pending_year_verification", 5),
-            ("file.name 2.tar.gz", "file.name 2.tar", 2),  # handles complex extensions
+            ("report 10.pdf", "report", 10),  # two-digit number
+            (".coverage 2", ".coverage", 2),  # hidden file
+            (".gitignore 3", ".gitignore", 3),  # hidden file
+            # Unicode and special characters
+            ("unicodé 2.txt", "unicodé", 2),  # unicode in filename
+            ("файл 2.txt", "файл", 2),  # cyrillic filename
+            ("my  file 2.txt", "my  file", 2),  # multiple spaces in name
         ],
     )
     def test_detects_conflict_files(
@@ -60,6 +66,13 @@ class TestConflictPattern:
             "file2.txt",  # no space before number
             "file 1.txt",  # 1 is not a conflict number
             "2 file.txt",  # number at start
+            ".coverage",  # hidden file without number
+            ".coverage 1",  # hidden file with 1 (not a conflict)
+            # Numbers in filename that are NOT conflicts
+            "file2023.txt",  # year in filename
+            "file.txt.2",  # number as pseudo-extension
+            "report_v2.pdf",  # version format
+            "photo-2024-01-15.jpg",  # date in filename
         ],
     )
     def test_ignores_non_conflict_files(
@@ -105,14 +118,8 @@ class TestDirectoryScan:
         tmp_path: Path,
     ) -> None:
         """Test that recursive scan finds nested conflicts."""
-        subdir = tmp_path / "subdir"
-        subdir.mkdir()
-
-        (tmp_path / "root 2.txt").touch()
-        (subdir / "nested 2.txt").touch()
-
+        _setup_nested_conflicts(tmp_path)
         conflicts = detector.scan_directory(tmp_path, recursive=True)
-
         assert len(conflicts) == 2
 
     def test_scan_non_recursive(
@@ -121,13 +128,15 @@ class TestDirectoryScan:
         tmp_path: Path,
     ) -> None:
         """Test that non-recursive scan ignores nested files."""
-        subdir = tmp_path / "subdir"
-        subdir.mkdir()
-
-        (tmp_path / "root 2.txt").touch()
-        (subdir / "nested 2.txt").touch()
-
+        _setup_nested_conflicts(tmp_path)
         conflicts = detector.scan_directory(tmp_path, recursive=False)
-
         assert len(conflicts) == 1
         assert conflicts[0].path.name == "root 2.txt"
+
+
+def _setup_nested_conflicts(tmp_path: Path) -> None:
+    """Create nested directory structure with conflict files."""
+    subdir = tmp_path / "subdir"
+    subdir.mkdir()
+    (tmp_path / "root 2.txt").touch()
+    (subdir / "nested 2.txt").touch()

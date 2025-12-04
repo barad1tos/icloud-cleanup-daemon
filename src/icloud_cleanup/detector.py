@@ -1,7 +1,9 @@
 """Detect iCloud sync conflict files."""
 
+
 from __future__ import annotations
 
+import contextlib
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -23,10 +25,7 @@ class ConflictFile:
     @property
     def original_path(self) -> Path:
         """Get the path to the original (non-conflict) file."""
-        if self.extension:
-            original_filename = f"{self.original_name}{self.extension}"
-        else:
-            original_filename = self.original_name
+        original_filename = f"{self.original_name}{self.extension}" if self.extension else self.original_name
         return self.path.parent / original_filename
 
     def __str__(self) -> str:
@@ -92,18 +91,11 @@ class ConflictDetector:
         if not directory.exists():
             return conflicts
 
-        try:
-            if recursive:
-                files = directory.rglob("*")
-            else:
-                files = directory.glob("*")
-
+        with contextlib.suppress(PermissionError):
+            files = directory.rglob("*") if recursive else directory.glob("*")
             for path in files:
                 if conflict := self.is_conflict_file(path):
                     conflicts.append(conflict)
-
-        except PermissionError:
-            pass  # Skip directories we can't access
 
         return conflicts
 
@@ -134,28 +126,20 @@ class ConflictDetector:
         """
         # First check if this path itself is a conflict
         conflict = self.is_conflict_file(path)
-        if conflict:
-            original = conflict.original_path
-        else:
-            original = path
-
+        original = conflict.original_path if conflict else path
         # Find all conflicts in the same directory
         parent = original.parent
         stem = original.stem
         suffix = original.suffix
 
         conflicts: list[ConflictFile] = []
-        try:
+        with contextlib.suppress(PermissionError):
             for sibling in parent.iterdir():
                 if sibling_conflict := self.is_conflict_file(sibling):
                     # Check if it's for the same original file
                     expected_original = f"{stem}"
-                    if sibling_conflict.original_name == expected_original:
-                        if sibling_conflict.extension == suffix or (
-                            sibling_conflict.extension is None and not suffix
-                        ):
-                            conflicts.append(sibling_conflict)
-        except PermissionError:
-            pass
-
+                    ext_matches = sibling_conflict.extension == suffix
+                    ext_both_none = sibling_conflict.extension is None and not suffix
+                    if sibling_conflict.original_name == expected_original and (ext_matches or ext_both_none):
+                        conflicts.append(sibling_conflict)
         return sorted(conflicts, key=lambda c: c.conflict_number)

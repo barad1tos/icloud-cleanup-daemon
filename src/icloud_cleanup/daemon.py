@@ -69,6 +69,10 @@ class ICloudCleanupDaemon:
         logger = logging.getLogger("icloud-cleanup")
         logger.setLevel(getattr(logging, self.config.log_level))
 
+        # Clear existing handlers to avoid duplicates if daemon is recreated
+        if logger.handlers:
+            logger.handlers.clear()
+
         # Console handler with Rich
         console_handler = RichHandler(
             console=Console(),
@@ -101,7 +105,7 @@ class ICloudCleanupDaemon:
         """
         path = conflict.path
 
-        # Check if original exists
+        # Check if the original exists
         if not conflict.original_path.exists():
             self.logger.warning(
                 "Skipping %s - original file doesn't exist: %s",
@@ -134,24 +138,29 @@ class ICloudCleanupDaemon:
 
     async def _process_pending_deletes(self) -> None:
         """Process files that have been pending long enough."""
-        current_time = asyncio.get_event_loop().time()
-        paths_to_process: list[Path] = []
+        current_time = asyncio.get_running_loop().time()
 
-        for path, timestamp in list(self._pending_deletes.items()):
-            if current_time - timestamp >= self.config.wait_before_delete:
-                paths_to_process.append(path)
-                del self._pending_deletes[path]
+        paths_to_process = [
+            path
+            for path, timestamp in self._pending_deletes.items()
+            if current_time - timestamp >= self.config.wait_before_delete
+        ]
+        for path in paths_to_process:
+            del self._pending_deletes[path]
 
         for path in paths_to_process:
             if conflict := self.detector.is_conflict_file(path):
                 await self._process_conflict(conflict)
 
-    async def _scan_and_queue(self) -> None:
+    def _scan_and_queue(self) -> None:
         """Scan all directories and queue conflicts for deletion."""
         conflicts = self.detector.scan_all()
-        current_time = asyncio.get_event_loop().time()
+        current_time = asyncio.get_running_loop().time()
 
         for conflict in conflicts:
+            # Only queue if the original file exists (otherwise it's not a real conflict)
+            if not conflict.original_path.exists():
+                continue
             if conflict.path not in self._pending_deletes:
                 self._pending_deletes[conflict.path] = current_time
                 self.stats.conflicts_detected += 1
@@ -167,13 +176,20 @@ class ICloudCleanupDaemon:
         self.logger.info("Starting single cleanup pass...")
         results: list[CleanupResult] = []
 
-        conflicts = self.detector.scan_all()
+        all_conflicts = self.detector.scan_all()
+        # Filter to only real conflicts (where the original exists)
+        conflicts = [c for c in all_conflicts if c.original_path.exists()]
+        if false_positives := len(all_conflicts) - len(conflicts):
+            self.logger.debug(
+                "Filtered out %d files where original doesn't exist",
+                false_positives,
+            )
         self.logger.info("Found %d conflict files", len(conflicts))
 
         for conflict in conflicts:
             self.stats.conflicts_detected += 1
 
-            # Wait specified time
+            # Wait a specified time
             self.logger.info(
                 "Waiting %ds before processing: %s",
                 self.config.wait_before_delete,
@@ -184,9 +200,7 @@ class ICloudCleanupDaemon:
             if result := await self._process_conflict(conflict):
                 results.append(result)
 
-        # Cleanup old recovery files
-        cleaned = self.cleaner.cleanup_recovery_dir()
-        if cleaned:
+        if cleaned := self.cleaner.cleanup_recovery_dir():
             self.logger.info("Cleaned %d expired recovery directories", cleaned)
 
         return results
@@ -197,7 +211,7 @@ class ICloudCleanupDaemon:
         self.logger.info("Starting iCloud cleanup daemon...")
 
         # Set up signal handlers
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         for sig in (signal.SIGTERM, signal.SIGINT):
             loop.add_signal_handler(sig, self._handle_shutdown)
 
@@ -205,7 +219,7 @@ class ICloudCleanupDaemon:
         self.watcher.start()
 
         # Initial scan
-        await self._scan_and_queue()
+        self._scan_and_queue()
 
         try:
             while self._running:
@@ -214,23 +228,26 @@ class ICloudCleanupDaemon:
 
                 # Check for new conflicts from watcher
                 while True:
-                    path = await self.watcher.get_pending_conflict(timeout=0.1)
-                    if path is None:
+                    try:
+                        async with asyncio.timeout(0.1):
+                            path = await self.watcher.get_pending_conflict()
+                    except TimeoutError:
                         break
                     if path not in self._pending_deletes:
-                        self._pending_deletes[path] = asyncio.get_event_loop().time()
+                        self._pending_deletes[path] = asyncio.get_running_loop().time()
                         self.stats.conflicts_detected += 1
                         self.logger.info("Detected new conflict: %s", path.name)
 
                 # Periodic full scan
                 await asyncio.sleep(self.config.scan_interval)
-                await self._scan_and_queue()
+                self._scan_and_queue()
 
                 # Periodic recovery cleanup
                 self.cleaner.cleanup_recovery_dir()
 
         except asyncio.CancelledError:
             self.logger.info("Daemon cancelled")
+            raise
         finally:
             self.watcher.stop()
             self.logger.info(
