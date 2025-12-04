@@ -195,6 +195,21 @@ Multiple safety mechanisms protect your files:
 | **Dry-Run Mode**    | Preview changes with `--dry-run`                              |
 | **iCloud Sync**     | Wait for sync completion before deletion                      |
 
+### Why Not macOS Trash?
+
+Files are moved to `~/.icloud-cleanup-trash/` instead of the system Trash (`~/.Trash`) by design:
+
+1. **Full control** — We manage retention periods and automatic cleanup (7 days by default)
+2. **Date organization** — Files are grouped by deletion date (`2025-12-04/`) for easy browsing
+3. **No Trash clutter** — Keeps your system Trash clean for manual deletions
+4. **Programmatic reliability** — Moving files to `~/.Trash` programmatically doesn't integrate properly with Finder (files won't appear in Trash UI without using private APIs)
+
+To restore a file:
+```bash
+icloud-cleanup recovery --list      # See all recoverable files
+icloud-cleanup recovery --restore /path/to/file
+```
+
 ### Logs
 
 ```bash
