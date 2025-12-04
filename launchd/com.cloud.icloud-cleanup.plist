@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.cloud.icloud-cleanup</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Users/cloud/Developer/icloud-cleanup-daemon/.venv/bin/python</string>
+        <string>-m</string>
+        <string>icloud_cleanup.main</string>
+        <string>run</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>/Users/cloud/Developer/icloud-cleanup-daemon</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PYTHONPATH</key>
+        <string>/Users/cloud/Developer/icloud-cleanup-daemon/src</string>
+    </dict>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>KeepAlive</key>
+    <dict>
+        <key>SuccessfulExit</key>
+        <false/>
+    </dict>
+
+    <key>StandardOutPath</key>
+    <string>/Users/cloud/Library/Logs/icloud-cleanup-daemon-stdout.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>/Users/cloud/Library/Logs/icloud-cleanup-daemon-stderr.log</string>
+
+    <key>ProcessType</key>
+    <string>Background</string>
+
+    <key>LowPriorityIO</key>
+    <true/>
+
+    <key>Nice</key>
+    <integer>10</integer>
+</dict>
+</plist>
