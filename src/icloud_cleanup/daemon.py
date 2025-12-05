@@ -58,6 +58,7 @@ class ICloudCleanupDaemon:
         self.stats = DaemonStats(start_time=datetime.now())
         self._running = False
         self._pending_deletes: dict[Path, float] = {}  # path -> timestamp when detected
+        self._failed_deletes: dict[Path, tuple[int, float]] = {}  # (count, timestamp)
 
     def _setup_logging(self) -> logging.Logger:
         """Set up logging for the daemon.
@@ -104,6 +105,13 @@ class ICloudCleanupDaemon:
 
         """
         path = conflict.path
+        current_time = asyncio.get_running_loop().time()
+
+        # Check cooldown status
+        should_skip, failure_count = self._check_cooldown_status(path, current_time)
+        if should_skip:
+            self.stats.conflicts_skipped += 1
+            return None
 
         # Check if the original exists
         if not conflict.original_path.exists():
@@ -125,16 +133,83 @@ class ICloudCleanupDaemon:
         # Delete/recover the conflict
         result = self.cleaner.delete_conflict(conflict)
 
-        # Update stats
+        # Update stats and failure tracking
+        self._update_stats_after_delete(path, result, failure_count, current_time)
+
+        return result
+
+    def _check_cooldown_status(self, path: Path, current_time: float) -> tuple[bool, int]:
+        """Check if a file is in cooldown and return its failure count.
+
+        Args:
+            path: Path to check.
+            current_time: Current loop time.
+
+        Returns:
+            Tuple of (should_skip, failure_count).
+
+        """
+        if path not in self._failed_deletes:
+            return False, 0
+
+        failure_count, last_failure_time = self._failed_deletes[path]
+        time_since_failure = current_time - last_failure_time
+
+        if failure_count < self.config.max_delete_retries:
+            return False, failure_count
+
+        if time_since_failure < self.config.retry_cooldown:
+            # Still in cooldown - skip silently
+            return True, failure_count
+
+        # Cooldown expired - reset counter and try again
+        self.logger.info(
+            "Cooldown expired for %s, retrying (was %d failures)",
+            path.name,
+            failure_count,
+        )
+        del self._failed_deletes[path]
+        return False, 0
+
+    def _update_stats_after_delete(
+        self, path: Path, result: CleanupResult, failure_count: int, current_time: float
+    ) -> None:
+        """Update stats and failure tracking after deletion attempt.
+
+        Args:
+            path: Path that was processed.
+            result: Result of the deletion attempt.
+            failure_count: Current failure count before this attempt.
+            current_time: Current loop time.
+
+        """
         if result.success:
             if result.action == "deleted":
                 self.stats.conflicts_deleted += 1
             elif result.action == "recovered":
                 self.stats.conflicts_recovered += 1
-        else:
-            self.stats.errors += 1
+            self._failed_deletes.pop(path, None)
+            return
 
-        return result
+        self.stats.errors += 1
+        new_count = failure_count + 1
+        self._failed_deletes[path] = (new_count, current_time)
+
+        if new_count >= self.config.max_delete_retries:
+            self.logger.warning(
+                "Failed to delete %s (%d/%d attempts), cooldown %ds",
+                path.name,
+                new_count,
+                self.config.max_delete_retries,
+                self.config.retry_cooldown,
+            )
+        else:
+            self.logger.debug(
+                "Failed to delete %s (attempt %d/%d)",
+                path.name,
+                new_count,
+                self.config.max_delete_retries,
+            )
 
     async def _process_pending_deletes(self) -> None:
         """Process files that have been pending long enough."""

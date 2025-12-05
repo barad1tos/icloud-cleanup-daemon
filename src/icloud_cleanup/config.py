@@ -55,6 +55,8 @@ class CleanupConfig:
 
     # Daemon settings
     scan_interval: int = 60  # Seconds between full scans (when not using FSEvents)
+    max_delete_retries: int = 3  # Max attempts to delete a file before cooldown
+    retry_cooldown: int = 3600  # Seconds to wait after max retries before trying again
 
     @classmethod
     def get_config_path(cls) -> Path:
