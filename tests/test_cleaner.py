@@ -92,14 +92,14 @@ class TestProtectedPaths:
 
     def test_regular_path_not_protected(self, cleaner: Cleaner) -> None:
         """Test that regular paths under home are not protected."""
-        # Use a path under home directory which is explicitly allowed
+        # Use a path under the home directory which is explicitly allowed
         home = Path.home()
         test_path = home / "some_test_dir" / "document 2.txt"
         # Don't need to create the file - is_path_protected checks path string, not existence
         assert not cleaner.is_path_protected(test_path)
 
     def test_root_path_protected(self, cleaner: Cleaner) -> None:
-        """Test that root itself is protected."""
+        """Test that the root itself is protected."""
         assert cleaner.is_path_protected(Path("/"))
 
 
@@ -133,7 +133,7 @@ class TestDeleteConflict:
         assert result.recovery_path.read_text() == "test content"
 
     def test_delete_without_recovery(self, config: CleanupConfig, logger: logging.Logger, tmp_path: Path) -> None:
-        """Test that deletion with recovery disabled permanently deletes."""
+        """Test that deletion with recovery disabled permanently deletes the file."""
         config.enable_recovery = False
         config.recovery_dir = tmp_path / "recovery"
         cleaner = Cleaner(config, logger)
@@ -214,7 +214,7 @@ class TestDeleteConflict:
         conflict_file.write_text("test content")
         conflict = _make_conflict(conflict_file)
 
-        # Simulate protected path
+        # Simulate a protected path
         with patch.object(cleaner, "is_path_protected", return_value=True):
             result = cleaner.delete_conflict(conflict)
 
@@ -303,7 +303,7 @@ class TestRecoveryCleanup:
 
     def test_cleanup_ignores_invalid_date_dirs(self, cleaner: Cleaner, config: CleanupConfig) -> None:
         """Test cleanup ignores directories with invalid names."""
-        # Create invalid directory
+        # Create an invalid directory
         invalid_dir = config.recovery_dir / "not-a-date"
         invalid_dir.mkdir(parents=True)
         (invalid_dir / "file.txt").touch()
@@ -326,7 +326,7 @@ class TestRestoreFile:
 
     def test_restore_to_destination(self, cleaner: Cleaner, config: CleanupConfig, tmp_path: Path) -> None:
         """Test restoring a file to a specific destination."""
-        # Create file in recovery
+        # Create a file in recovery
         date_dir = config.recovery_dir / datetime.now(UTC).strftime("%Y-%m-%d")
         date_dir.mkdir(parents=True)
         recovery_file = date_dir / "abc123_document 2.txt"
@@ -347,7 +347,7 @@ class TestRestoreFile:
 
     def test_restore_to_default_location(self, cleaner: Cleaner, config: CleanupConfig) -> None:
         """Test restoring a file to the default location."""
-        # Create file in recovery with hash prefix
+        # Create a file in recovery with hash prefix
         date_dir = config.recovery_dir / datetime.now(UTC).strftime("%Y-%m-%d")
         date_dir.mkdir(parents=True)
         recovery_file = date_dir / "abc123_document.txt"
@@ -395,12 +395,12 @@ class TestListRecoverableFiles:
 
     def test_list_ignores_invalid_dirs(self, cleaner: Cleaner, config: CleanupConfig) -> None:
         """Test that listing ignores invalid date directories."""
-        # Create invalid directory
+        # Create an invalid directory
         invalid_dir = config.recovery_dir / "invalid"
         invalid_dir.mkdir(parents=True)
         (invalid_dir / "file.txt").touch()
 
-        # Create valid directory
+        # Create a valid directory
         valid_dir = config.recovery_dir / datetime.now(UTC).strftime("%Y-%m-%d")
         valid_dir.mkdir(parents=True)
         (valid_dir / "valid.txt").touch()
@@ -415,7 +415,7 @@ class TestDeleteDetected:
     """Tests for delete_detected — the module-system entry point."""
 
     def test_delete_with_recovery_enabled(self, cleaner: Cleaner, tmp_path: Path) -> None:
-        """Test that recovery_enabled=True moves file to recovery."""
+        """Test that recovery_enabled=True moves the file to recovery."""
         from icloud_cleanup.modules.base import DetectedFile
 
         target = tmp_path / "conflict 2.txt"
@@ -437,7 +437,7 @@ class TestDeleteDetected:
         assert not target.exists()
 
     def test_delete_with_recovery_disabled(self, config: CleanupConfig, logger: logging.Logger, tmp_path: Path) -> None:
-        """Test that recovery_enabled=False permanently deletes."""
+        """Test that recovery_enabled=False permanently deletes the file."""
         from icloud_cleanup.modules.base import DetectedFile
 
         config.enable_recovery = True  # global recovery on, but file opts out

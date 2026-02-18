@@ -123,7 +123,7 @@ When modifying this codebase, watch out for:
 
 7. **JetBrains MCP `get_file_problems`**: The `errorsOnly` parameter defaults to `true`. Always pass `errorsOnly: false` to get warnings. Note: Grazie (grammar), Sourcery, and SonarLint diagnostics are NOT exposed — only PyCharm's built-in Python inspections and Pyright.
 
-8. **IDE warnings are action items**: When the user shares IDE diagnostics, LanguageTool warnings, or any code quality feedback — always fix them immediately. Do not dismiss them as cosmetic or non-blocking. The project maintains clean grammar in docstrings and comments.
+8. **IDE warnings are action items**: When the user shares IDE diagnostics, LanguageTool warnings, or any code quality feedback — always fix them immediately. Do not dismiss them as cosmetic or non-blocking. The project maintains clean grammar in docstrings and comments, including proper use of articles (`a`, `an`, `the`) in English text.
 
 ## Configuration
 
