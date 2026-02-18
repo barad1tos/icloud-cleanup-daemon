@@ -23,6 +23,7 @@ Automatically cleans up iCloud sync conflict files (e.g., `file 2.csv`, `file 3.
 
 ## Features
 
+- **Modular Cleanup** — Plugin-based architecture: iCloud conflicts, stale `.coverage` artifacts, and more
 - **Real-time Monitoring** — Detects new conflict files using macOS FSEvents
 - **iCloud Aware** — Waits for iCloud to finish syncing before deletion
 - **Smart Detection** — Only deletes true conflicts (verifies original file exists)
@@ -103,7 +104,7 @@ icloud-cleanup scan
 icloud-cleanup scan --dir ~/Documents
 
 # Run cleanup
-icloud-cleanup run --dry-run    # Preview only
+icloud-cleanup run --dry-run    # Preview (exit 1 if files found)
 icloud-cleanup run --once       # Run once
 icloud-cleanup run              # Run as daemon
 
@@ -157,17 +158,29 @@ make config
 | `recovery.enabled`        | true         | Move to trash instead of delete |
 | `recovery.retention_days` | 7            | Days to keep deleted files      |
 | `scan_interval`           | 60s          | Interval between full scans     |
+| `modules.disabled`        | []           | List of module names to disable |
 
 ## How It Works
 
 ```
-1. Detection    →  Find files matching "filename N.ext" (N ≥ 2)
-2. Verification →  Check if "filename.ext" exists (prevents false positives)
-3. Safety Check →  Ensure file is not in protected directory
-4. Sync Check   →  Wait for iCloud to finish syncing
-5. Cleanup      →  Move to recovery directory
-6. Retention    →  Auto-delete after 7 days
+1. Discovery   →  Auto-discover enabled cleanup modules
+2. Detection   →  Each module scans for its file patterns
+3. Watching    →  FSEvents monitor triggers modules in real-time
+4. Verification →  Module-specific checks (e.g., original exists)
+5. Safety Check →  Ensure file is not in protected directory
+6. Sync Check  →  Wait for iCloud sync (if recovery enabled)
+7. Cleanup     →  Delete or move to recovery directory
+8. Retention   →  Auto-delete recovered files after 7 days
 ```
+
+### Cleanup Modules
+
+| Module | Detects | Recovery |
+|--------|---------|----------|
+| `icloud_conflicts` | `filename 2.ext` when `filename.ext` exists | Yes |
+| `coverage_artifacts` | `.coverage.host.pidN.hash` when `.coverage` exists | No |
+
+New modules are auto-discovered — drop a file in `src/icloud_cleanup/modules/` and it works.
 
 ### What IS a Conflict
 

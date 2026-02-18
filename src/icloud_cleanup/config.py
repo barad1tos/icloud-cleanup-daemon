@@ -48,15 +48,16 @@ class CleanupConfig:
     recovery_retention_days: int = 7
 
     # Logging
-    log_file: Path = field(
-        default_factory=lambda: Path.home() / "Library/Logs/icloud-cleanup-daemon.log"
-    )
+    log_file: Path = field(default_factory=lambda: Path.home() / "Library/Logs/icloud-cleanup-daemon.log")
     log_level: str = "INFO"
 
     # Daemon settings
     scan_interval: int = 60  # Seconds between full scans (when not using FSEvents)
     max_delete_retries: int = 3  # Max attempts to delete a file before cooldown
     retry_cooldown: int = 3600  # Seconds to wait after max retries before trying again
+
+    # Module settings
+    modules_disabled: list[str] = field(default_factory=list)
 
     @classmethod
     def get_config_path(cls) -> Path:
@@ -65,10 +66,10 @@ class CleanupConfig:
 
     @classmethod
     def load(cls, config_path: Path | None = None) -> CleanupConfig:
-        """Load configuration from YAML file.
+        """Load configuration from the YAML file.
 
         Args:
-            config_path: Path to config file.
+            config_path: Path to a config file.
             Use default if None.
 
         Returns:
@@ -79,7 +80,7 @@ class CleanupConfig:
             config_path = cls.get_config_path()
 
         if not config_path.exists():
-            # Return default config with iCloud Drive as default watch directory
+            # Return the default config with iCloud Drive as the default watch directory
             config = cls()
             config.watch_directories = cls._get_default_watch_directories()
             return config
@@ -91,7 +92,7 @@ class CleanupConfig:
 
     @classmethod
     def _from_dict(cls, data: dict[str, Any]) -> CleanupConfig:
-        """Create config from dictionary."""
+        """Create config from a dictionary."""
         config = cls()
 
         # Watch directories
@@ -112,6 +113,7 @@ class CleanupConfig:
         # Nested sections
         cls._apply_recovery_config(config, data.get("recovery", {}))
         cls._apply_logging_config(config, data.get("logging", {}))
+        cls._apply_modules_config(config, data.get("modules", {}))
 
         return config
 
@@ -131,6 +133,15 @@ class CleanupConfig:
         config.log_level = logging_cfg.get("level", config.log_level)
 
     @classmethod
+    def _apply_modules_config(cls, config: CleanupConfig, modules_cfg: dict[str, Any]) -> None:
+        """Apply modules settings from config dict."""
+        disabled = modules_cfg.get("disabled", [])
+        if isinstance(disabled, str):
+            disabled = [disabled]
+        if isinstance(disabled, list):
+            config.modules_disabled = [str(name) for name in disabled]
+
+    @classmethod
     def _get_default_watch_directories(cls) -> list[Path]:
         """Get default iCloud directories to watch."""
         icloud_base = Path.home() / "Library/Mobile Documents"
@@ -145,7 +156,7 @@ class CleanupConfig:
         return directories
 
     def save(self, config_path: Path | None = None) -> None:
-        """Save configuration to YAML file.
+        """Save configuration to the YAML file.
 
         Args:
             config_path: Path to save config.
@@ -173,6 +184,9 @@ class CleanupConfig:
             "logging": {
                 "file": str(self.log_file),
                 "level": self.log_level,
+            },
+            "modules": {
+                "disabled": self.modules_disabled,
             },
         }
 

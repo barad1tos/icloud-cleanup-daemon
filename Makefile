@@ -121,7 +121,7 @@ lint: ## Run linter
 	uv run ruff check src/ tests/
 
 typecheck: ## Run type checker
-	uv run mypy src/
+	uv run ty check src/
 
 check: lint typecheck test ## Run all checks (lint, typecheck, test)
 

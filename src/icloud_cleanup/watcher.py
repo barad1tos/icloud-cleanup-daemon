@@ -11,11 +11,14 @@ from typing import TYPE_CHECKING, Any
 from watchdog.events import FileCreatedEvent, FileMovedEvent, FileSystemEventHandler
 from watchdog.observers import Observer
 
+from .modules.base import DetectedFile
+
 if TYPE_CHECKING:
     from watchdog.events import FileSystemEvent
 
     from .config import CleanupConfig
     from .detector import ConflictDetector
+    from .modules.base import CleanupModule
 
 
 class ConflictEventHandler(FileSystemEventHandler):
@@ -24,21 +27,24 @@ class ConflictEventHandler(FileSystemEventHandler):
     def __init__(
         self,
         detector: ConflictDetector,
-        callback: Callable[[Path], None],
+        callback: Callable[[Path, DetectedFile | None], None],
         logger: logging.Logger,
+        modules: list[CleanupModule] | None = None,
     ) -> None:
         """Initialize the event handler.
 
         Args:
             detector: Conflict detector instance.
-            callback: Function to call when conflict is detected.
+            callback: Invoked with (path, DetectedFile) when a match occurs.
             logger: Logger instance.
+            modules: Optional list of cleanup modules with supports_watch=True.
 
         """
         super().__init__()
         self.detector = detector
         self.callback = callback
         self.logger = logger
+        self._watch_modules = [m for m in (modules or []) if m.supports_watch]
 
     def on_created(self, event: FileSystemEvent) -> None:
         """Handle file creation events.
@@ -63,15 +69,32 @@ class ConflictEventHandler(FileSystemEventHandler):
             self._check_path(Path(dest_path))
 
     def _check_path(self, path: Path) -> None:
-        """Check if the path is a conflict file.
+        """Check if the path matches any watch-capable module.
+
+        Iterates all watch-capable modules first, then falls back to the
+        legacy detector. The first match wins. DetectedFile context is
+        passed through the callback, so the daemon preserves module info.
 
         Args:
             path: Path to check.
 
         """
-        if conflict := self.detector.is_conflict_file(path):
-            self.logger.debug("Detected conflict file: %s", conflict.path.name)
-            self.callback(path)
+        for module in self._watch_modules:
+            if detected := module.is_target(path):
+                self.logger.debug("Detected [%s]: %s", detected.module_name, path.name)
+                self.callback(path, detected)
+                return
+
+        # Legacy detector fallback — wrap in a DetectedFile for the unified pipeline
+        if self.detector.is_conflict_file(path):
+            detected = DetectedFile(
+                path=path,
+                module_name="icloud_conflicts",
+                reason="iCloud conflict (legacy detector)",
+                recovery_enabled=True,
+            )
+            self.logger.debug("Detected [legacy]: %s", path.name)
+            self.callback(path, detected)
 
 
 class FileWatcher:
@@ -82,6 +105,7 @@ class FileWatcher:
         config: CleanupConfig,
         detector: ConflictDetector,
         logger: logging.Logger,
+        modules: list[CleanupModule] | None = None,
     ) -> None:
         """Initialize the file watcher.
 
@@ -89,26 +113,29 @@ class FileWatcher:
             config: Cleanup configuration.
             detector: Conflict detector instance.
             logger: Logger instance.
+            modules: Optional list of cleanup modules for a multi-module watch.
 
         """
         self.config = config
         self.detector = detector
         self.logger = logger
+        self._modules = modules or []
         self._observer: Any = None
-        self._pending_conflicts: asyncio.Queue[Path] = asyncio.Queue()
+        self._pending_queue: asyncio.Queue[tuple[Path, DetectedFile | None]] = asyncio.Queue()
         self._running = False
 
-    def _on_conflict_detected(self, path: Path) -> None:
-        """Handle detected conflict file.
+    def _on_file_detected(self, path: Path, detected: DetectedFile | None) -> None:
+        """Handle a detected file from any module.
 
         Args:
-            path: Path to conflict file.
+            path: Path to the detected file.
+            detected: DetectedFile with module context, or None for legacy matches.
 
         """
         try:
-            self._pending_conflicts.put_nowait(path)
+            self._pending_queue.put_nowait((path, detected))
         except asyncio.QueueFull:
-            self.logger.warning("Conflict queue full, dropping: %s", path.name)
+            self.logger.warning("Watch queue full, dropping: %s", path.name)
 
     def start(self) -> None:
         """Start watching configured directories."""
@@ -118,8 +145,9 @@ class FileWatcher:
         self._observer = Observer()
         handler = ConflictEventHandler(
             self.detector,
-            self._on_conflict_detected,
+            self._on_file_detected,
             self.logger,
+            modules=self._modules,
         )
 
         for directory in self.config.watch_directories:
@@ -147,26 +175,26 @@ class FileWatcher:
         """Check if the watcher is running."""
         return self._running
 
-    async def get_pending_conflict(self) -> Path:
-        """Get a pending conflict file from the queue.
+    async def get_pending(self) -> tuple[Path, DetectedFile | None]:
+        """Get a pending detected file from the queue.
 
         Returns:
-            Path to conflict file.
+            Tuple of the path, and DetectedFile or None for legacy matches.
 
         """
-        return await self._pending_conflicts.get()
+        return await self._pending_queue.get()
 
     def clear_pending(self) -> int:
-        """Clear all pending conflicts.
+        """Clear all pending items.
 
         Returns:
-            Number of conflicts cleared.
+            Number of items cleared.
 
         """
         count = 0
-        while not self._pending_conflicts.empty():
+        while not self._pending_queue.empty():
             try:
-                self._pending_conflicts.get_nowait()
+                self._pending_queue.get_nowait()
                 count += 1
             except asyncio.QueueEmpty:
                 break
