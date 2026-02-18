@@ -57,6 +57,20 @@ class TestDaemonInit:
         assert daemon.config.retry_cooldown == 3600
 
 
+class TestLogLevelValidation:
+    """Tests for log_level validation in daemon init."""
+
+    def test_invalid_log_level_raises(self, tmp_path: Path) -> None:
+        """Test that an invalid log_level raises ValueError."""
+        config = CleanupConfig()
+        config.watch_directories = [tmp_path]
+        config.log_file = tmp_path / "test.log"
+        config.log_level = "INVALID"
+
+        with pytest.raises(ValueError, match="Invalid log_level"):
+            ICloudCleanupDaemon(config)
+
+
 class TestRetryLimit:
     """Tests for retry limit functionality."""
 

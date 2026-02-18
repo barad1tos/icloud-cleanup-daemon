@@ -143,7 +143,6 @@ class FileWatcher:
 
     @property
     def is_running(self) -> bool:
-
         return self._running
 
     async def get_pending(self) -> tuple[Path, DetectedFile | None]:

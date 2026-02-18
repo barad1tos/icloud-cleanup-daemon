@@ -180,9 +180,7 @@ class TestIsSynced:
             mock_run.return_value = MagicMock(stdout=b"", returncode=0)
             assert checker.is_synced(test_file) is True
 
-    def test_uploading_file_not_synced(
-        self, checker: ICloudStatusChecker, tmp_path: Path
-    ) -> None:
+    def test_uploading_file_not_synced(self, checker: ICloudStatusChecker, tmp_path: Path) -> None:
         """Test is_synced returns False for uploading file."""
         test_file = tmp_path / "uploading.txt"
         test_file.write_text("content")
@@ -199,9 +197,7 @@ class TestWaitForSync:
     """Tests for wait_for_sync async method."""
 
     @pytest.mark.asyncio
-    async def test_already_synced(
-        self, checker: ICloudStatusChecker, tmp_path: Path
-    ) -> None:
+    async def test_already_synced(self, checker: ICloudStatusChecker, tmp_path: Path) -> None:
         """Test wait_for_sync returns immediately if already synced."""
         test_file = tmp_path / "synced.txt"
         test_file.write_text("content")
@@ -212,9 +208,7 @@ class TestWaitForSync:
         assert result is True
 
     @pytest.mark.asyncio
-    async def test_timeout_on_not_synced(
-        self, config: CleanupConfig, tmp_path: Path
-    ) -> None:
+    async def test_timeout_on_not_synced(self, config: CleanupConfig, tmp_path: Path) -> None:
         """Test wait_for_sync returns False on timeout."""
         config.max_icloud_wait = 2
         config.icloud_poll_interval = 1
@@ -229,9 +223,7 @@ class TestWaitForSync:
         assert result is False
 
     @pytest.mark.asyncio
-    async def test_becomes_synced(
-        self, config: CleanupConfig, tmp_path: Path
-    ) -> None:
+    async def test_becomes_synced(self, config: CleanupConfig, tmp_path: Path) -> None:
         """Test wait_for_sync succeeds when a file becomes synced."""
         config.max_icloud_wait = 10
         config.icloud_poll_interval = 1
@@ -249,9 +241,7 @@ class TestWaitForSync:
         assert result is True
 
     @pytest.mark.asyncio
-    async def test_minimum_poll_interval(
-        self, config: CleanupConfig, tmp_path: Path
-    ) -> None:
+    async def test_minimum_poll_interval(self, config: CleanupConfig, tmp_path: Path) -> None:
         """Test that poll interval is at least 1 second."""
         config.icloud_poll_interval = 0  # Would cause infinite loop without check
         config.max_icloud_wait = 2
@@ -343,3 +333,18 @@ class TestIsICloudIdle:
             return_value={"status": "unknown"},
         ):
             assert checker.is_icloud_idle() is True
+
+
+class TestSubprocessTimeout:
+    """Tests for subprocess timeout handling."""
+
+    def test_xattr_timeout_returns_unknown(self, tmp_path: Path) -> None:
+        """Test that an xattr timeout returns UNKNOWN status."""
+        test_file = tmp_path / "slow.txt"
+        test_file.write_text("content")
+
+        with patch("subprocess.run") as mock_run:
+            mock_run.side_effect = subprocess.TimeoutExpired(cmd="xattr", timeout=10)
+            status = ICloudStatusChecker.get_file_status(test_file)
+
+        assert status.status == SyncStatus.UNKNOWN
