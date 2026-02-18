@@ -104,7 +104,7 @@ icloud-cleanup scan
 icloud-cleanup scan --dir ~/Documents
 
 # Run cleanup
-icloud-cleanup run --dry-run    # Preview (exit code = file count)
+icloud-cleanup run --dry-run    # Preview (exit 1 if files found)
 icloud-cleanup run --once       # Run once
 icloud-cleanup run              # Run as daemon
 

@@ -211,6 +211,7 @@ def _print_config(config: CleanupConfig, console: Console) -> int:  # NOSONAR
     table.add_row("Retention days", str(config.recovery_retention_days))
     table.add_row("Log file", str(config.log_file))
     table.add_row("Log level", config.log_level)
+    table.add_row("Disabled modules", ", ".join(config.modules_disabled) or "none")
 
     console.print(table)
     return 0
@@ -302,7 +303,7 @@ def cmd_run(config: CleanupConfig, args: argparse.Namespace) -> int:  # NOSONAR
 
 
 def _dry_run(config: CleanupConfig) -> int:
-    """Show what would be deleted. Returns count of files found (0 = clean)."""
+    """Show what would be deleted. Returns 1 if files found, 0 if clean."""
     from .modules import discover_modules
 
     console = Console()
@@ -338,7 +339,7 @@ def _dry_run(config: CleanupConfig) -> int:
 
     console.print(table)
     console.print("\n[bold]To actually run, remove --dry-run flag[/bold]")
-    return len(all_detected)
+    return 1
 
 
 def cmd_nosync(config: CleanupConfig, args: argparse.Namespace) -> int:

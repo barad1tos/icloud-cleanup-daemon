@@ -110,9 +110,7 @@ class TestDeleteConflict:
     /private/var/folders/... on macOS, which is considered a protected system path.
     """
 
-    def test_delete_nonexistent_file(
-        self, cleaner: Cleaner, tmp_path: Path
-    ) -> None:
+    def test_delete_nonexistent_file(self, cleaner: Cleaner, tmp_path: Path) -> None:
         """Test deleting a file that doesn't exist."""
         conflict = _make_conflict(tmp_path / "missing 2.txt")
         result = cleaner.delete_conflict(conflict)
@@ -122,9 +120,7 @@ class TestDeleteConflict:
         assert result.error is not None
         assert "no longer exists" in result.error.lower()
 
-    def test_delete_with_recovery(
-        self, cleaner: Cleaner, config: CleanupConfig, tmp_path: Path
-    ) -> None:
+    def test_delete_with_recovery(self, cleaner: Cleaner, config: CleanupConfig, tmp_path: Path) -> None:
         """Test deletion with recovery enabled moves file."""
         conflict_file = tmp_path / "document 2.txt"
         conflict_file.write_text("test content")
@@ -136,9 +132,7 @@ class TestDeleteConflict:
         assert not conflict_file.exists()
         assert result.recovery_path.read_text() == "test content"
 
-    def test_delete_without_recovery(
-        self, config: CleanupConfig, logger: logging.Logger, tmp_path: Path
-    ) -> None:
+    def test_delete_without_recovery(self, config: CleanupConfig, logger: logging.Logger, tmp_path: Path) -> None:
         """Test deletion with recovery disabled permanently deletes."""
         config.enable_recovery = False
         config.recovery_dir = tmp_path / "recovery"
@@ -153,9 +147,7 @@ class TestDeleteConflict:
         assert not conflict_file.exists()
 
     @staticmethod
-    def _delete_and_verify_action(
-        cleaner: Cleaner, conflict: ConflictFile, expected_action: str
-    ) -> CleanupResult:
+    def _delete_and_verify_action(cleaner: Cleaner, conflict: ConflictFile, expected_action: str) -> CleanupResult:
         """Delete conflict with protection bypassed and verify action."""
         with patch.object(cleaner, "is_path_protected", return_value=False):
             result = cleaner.delete_conflict(conflict)
@@ -163,9 +155,7 @@ class TestDeleteConflict:
         assert result.action == expected_action
         return result
 
-    def test_recovery_path_collision(
-        self, cleaner: Cleaner, tmp_path: Path
-    ) -> None:
+    def test_recovery_path_collision(self, cleaner: Cleaner, tmp_path: Path) -> None:
         """Test handling of recovery path collisions."""
         dir1 = tmp_path / "dir1"
         dir2 = tmp_path / "dir2"
@@ -193,9 +183,7 @@ class TestDeleteConflict:
         assert result1.recovery_path.exists()
         assert result2.recovery_path.exists()
 
-    def test_delete_preserves_file_content(
-        self, cleaner: Cleaner, tmp_path: Path
-    ) -> None:
+    def test_delete_preserves_file_content(self, cleaner: Cleaner, tmp_path: Path) -> None:
         """Test that recovery preserves file content."""
         conflict_file = tmp_path / "binary 2.bin"
         binary_content = bytes(range(256))
@@ -220,9 +208,7 @@ class TestDeleteConflict:
         assert result.action == "deleted"
         assert not conflict_file.exists()
 
-    def test_delete_protected_path_blocked(
-        self, cleaner: Cleaner, tmp_path: Path
-    ) -> None:
+    def test_delete_protected_path_blocked(self, cleaner: Cleaner, tmp_path: Path) -> None:
         """Test that deletion of protected paths is blocked."""
         conflict_file = tmp_path / "document 2.txt"
         conflict_file.write_text("test content")
@@ -242,9 +228,7 @@ class TestDeleteConflict:
 class TestRecoveryCleanup:
     """Tests for recovery directory cleanup."""
 
-    def test_cleanup_old_directories(
-        self, cleaner: Cleaner, config: CleanupConfig
-    ) -> None:
+    def test_cleanup_old_directories(self, cleaner: Cleaner, config: CleanupConfig) -> None:
         """Test that old recovery directories are cleaned up."""
         old_dir = self._create_dated_recovery_dir(config, days_ago=10, filename="old_file.txt")
         recent_dir = self._create_dated_recovery_dir(config, days_ago=3, filename="recent_file.txt")
@@ -255,9 +239,7 @@ class TestRecoveryCleanup:
         assert not old_dir.exists()
         assert recent_dir.exists()
 
-    def test_cleanup_retention_zero_days(
-        self, config: CleanupConfig, logger: logging.Logger
-    ) -> None:
+    def test_cleanup_retention_zero_days(self, config: CleanupConfig, logger: logging.Logger) -> None:
         """When retention is 0, all dated recovery directories should be removed."""
         config.recovery_retention_days = 0
         cleaner = Cleaner(config, logger)
@@ -271,9 +253,7 @@ class TestRecoveryCleanup:
         assert not old_dir.exists()
         assert not recent_dir.exists()
 
-    def test_cleanup_retention_one_day_boundary(
-        self, config: CleanupConfig, logger: logging.Logger
-    ) -> None:
+    def test_cleanup_retention_one_day_boundary(self, config: CleanupConfig, logger: logging.Logger) -> None:
         """Validate 1-day retention boundary (dirs >= retention_days old are removed)."""
         config.recovery_retention_days = 1
         cleaner = Cleaner(config, logger)
@@ -310,21 +290,18 @@ class TestRecoveryCleanup:
         cleaned = cleaner.cleanup_recovery_dir()
         assert cleaned == 0
 
-    def test_cleanup_nonexistent_recovery_dir(
-        self, cleaner: Cleaner, config: CleanupConfig
-    ) -> None:
+    def test_cleanup_nonexistent_recovery_dir(self, cleaner: Cleaner, config: CleanupConfig) -> None:
         """Test cleanup handles nonexistent recovery directory."""
         # Ensure recovery dir doesn't exist
         if config.recovery_dir.exists():
             import shutil
+
             shutil.rmtree(config.recovery_dir)
 
         cleaned = cleaner.cleanup_recovery_dir()
         assert cleaned == 0
 
-    def test_cleanup_ignores_invalid_date_dirs(
-        self, cleaner: Cleaner, config: CleanupConfig
-    ) -> None:
+    def test_cleanup_ignores_invalid_date_dirs(self, cleaner: Cleaner, config: CleanupConfig) -> None:
         """Test cleanup ignores directories with invalid names."""
         # Create invalid directory
         invalid_dir = config.recovery_dir / "not-a-date"
@@ -347,9 +324,7 @@ class TestRecoveryCleanup:
 class TestRestoreFile:
     """Tests for file restoration."""
 
-    def test_restore_to_destination(
-        self, cleaner: Cleaner, config: CleanupConfig, tmp_path: Path
-    ) -> None:
+    def test_restore_to_destination(self, cleaner: Cleaner, config: CleanupConfig, tmp_path: Path) -> None:
         """Test restoring file to a specific destination."""
         # Create file in recovery
         date_dir = config.recovery_dir / datetime.now(UTC).strftime("%Y-%m-%d")
@@ -364,17 +339,13 @@ class TestRestoreFile:
         assert destination.exists()
         assert destination.read_text() == "restored content"
 
-    def test_restore_nonexistent_file(
-        self, cleaner: Cleaner, tmp_path: Path
-    ) -> None:
+    def test_restore_nonexistent_file(self, cleaner: Cleaner, tmp_path: Path) -> None:
         """Test restoring nonexistent file fails."""
         missing = tmp_path / "missing.txt"
         success = cleaner.restore_file(missing)
         assert not success
 
-    def test_restore_to_default_location(
-        self, cleaner: Cleaner, config: CleanupConfig
-    ) -> None:
+    def test_restore_to_default_location(self, cleaner: Cleaner, config: CleanupConfig) -> None:
         """Test restoring file to default location."""
         # Create file in recovery with hash prefix
         date_dir = config.recovery_dir / datetime.now(UTC).strftime("%Y-%m-%d")
@@ -401,9 +372,7 @@ class TestListRecoverableFiles:
         files = cleaner.list_recoverable_files()
         assert files == []
 
-    def test_list_files_sorted_by_date(
-        self, cleaner: Cleaner, config: CleanupConfig
-    ) -> None:
+    def test_list_files_sorted_by_date(self, cleaner: Cleaner, config: CleanupConfig) -> None:
         """Test files are sorted by date (newest first)."""
         # Create files on different dates
         old_date = datetime.now(UTC) - timedelta(days=5)
@@ -424,9 +393,7 @@ class TestListRecoverableFiles:
         assert "new.txt" in files[0][0].name
         assert "old.txt" in files[1][0].name
 
-    def test_list_ignores_invalid_dirs(
-        self, cleaner: Cleaner, config: CleanupConfig
-    ) -> None:
+    def test_list_ignores_invalid_dirs(self, cleaner: Cleaner, config: CleanupConfig) -> None:
         """Test listing ignores invalid date directories."""
         # Create invalid directory
         invalid_dir = config.recovery_dir / "invalid"
@@ -442,3 +409,90 @@ class TestListRecoverableFiles:
 
         assert len(files) == 1
         assert "valid.txt" in files[0][0].name
+
+
+class TestDeleteDetected:
+    """Tests for delete_detected — the module-system entry point."""
+
+    def test_delete_with_recovery_enabled(self, cleaner: Cleaner, tmp_path: Path) -> None:
+        """Test that recovery_enabled=True moves file to recovery."""
+        from icloud_cleanup.modules.base import DetectedFile
+
+        target = tmp_path / "conflict 2.txt"
+        target.write_text("content")
+        detected = DetectedFile(
+            path=target,
+            module_name="icloud_conflicts",
+            reason="test conflict",
+            recovery_enabled=True,
+        )
+
+        with patch.object(cleaner, "is_path_protected", return_value=False):
+            result = cleaner.delete_detected(detected)
+
+        assert result.success
+        assert result.action == "recovered"
+        assert result.recovery_path is not None
+        assert result.recovery_path.exists()
+        assert not target.exists()
+
+    def test_delete_with_recovery_disabled(self, config: CleanupConfig, logger: logging.Logger, tmp_path: Path) -> None:
+        """Test that recovery_enabled=False permanently deletes."""
+        from icloud_cleanup.modules.base import DetectedFile
+
+        config.enable_recovery = True  # global recovery on, but file opts out
+        cleaner = Cleaner(config, logger)
+
+        target = tmp_path / ".coverage.host.pid1.abc"
+        target.write_text("stale")
+        detected = DetectedFile(
+            path=target,
+            module_name="coverage_artifacts",
+            reason="stale artifact",
+            recovery_enabled=False,
+        )
+
+        with patch.object(cleaner, "is_path_protected", return_value=False):
+            result = cleaner.delete_detected(detected)
+
+        assert result.success
+        assert result.action == "deleted"
+        assert result.recovery_path is None
+        assert not target.exists()
+
+    def test_delete_nonexistent_detected(self, cleaner: Cleaner, tmp_path: Path) -> None:
+        """Test deleting a detected file that no longer exists."""
+        from icloud_cleanup.modules.base import DetectedFile
+
+        missing = tmp_path / "gone 2.txt"
+        detected = DetectedFile(
+            path=missing,
+            module_name="icloud_conflicts",
+            reason="test",
+            recovery_enabled=True,
+        )
+
+        result = cleaner.delete_detected(detected)
+
+        assert not result.success
+        assert result.action == "skipped"
+
+    def test_delete_protected_detected(self, cleaner: Cleaner, tmp_path: Path) -> None:
+        """Test that protected paths are blocked for detected files."""
+        from icloud_cleanup.modules.base import DetectedFile
+
+        target = tmp_path / "system 2.txt"
+        target.write_text("protected")
+        detected = DetectedFile(
+            path=target,
+            module_name="icloud_conflicts",
+            reason="test",
+            recovery_enabled=True,
+        )
+
+        with patch.object(cleaner, "is_path_protected", return_value=True):
+            result = cleaner.delete_detected(detected)
+
+        assert not result.success
+        assert result.action == "skipped"
+        assert target.exists()

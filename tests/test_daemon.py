@@ -61,9 +61,7 @@ class TestRetryLimit:
     """Tests for retry limit functionality."""
 
     @pytest.mark.asyncio
-    async def test_skips_during_cooldown(
-        self, daemon: ICloudCleanupDaemon, tmp_path: Path
-    ) -> None:
+    async def test_skips_during_cooldown(self, daemon: ICloudCleanupDaemon, tmp_path: Path) -> None:
         """Test that files are skipped during the cooldown period."""
         conflict_file = tmp_path / "document 2.txt"
         conflict_file.touch()
@@ -78,12 +76,10 @@ class TestRetryLimit:
         result = await daemon._process_conflict(conflict)
 
         assert result is None
-        assert daemon.stats.conflicts_skipped == 1
+        assert daemon.stats.files_skipped == 1
 
     @pytest.mark.asyncio
-    async def test_retries_after_cooldown_expires(
-        self, daemon: ICloudCleanupDaemon, tmp_path: Path
-    ) -> None:
+    async def test_retries_after_cooldown_expires(self, daemon: ICloudCleanupDaemon, tmp_path: Path) -> None:
         """Test that files are retried after cooldown expires."""
         conflict_file = tmp_path / "document 2.txt"
         conflict_file.touch()
@@ -112,9 +108,7 @@ class TestRetryLimit:
         assert conflict_file not in daemon._failed_deletes
 
     @pytest.mark.asyncio
-    async def test_increments_failure_count(
-        self, daemon: ICloudCleanupDaemon, tmp_path: Path
-    ) -> None:
+    async def test_increments_failure_count(self, daemon: ICloudCleanupDaemon, tmp_path: Path) -> None:
         """Test that failure count is incremented on failed deletion."""
         conflict_file = tmp_path / "document 2.txt"
         conflict_file.touch()
@@ -141,9 +135,7 @@ class TestRetryLimit:
         assert daemon.stats.errors == 1
 
     @pytest.mark.asyncio
-    async def test_clears_failure_on_success(
-        self, daemon: ICloudCleanupDaemon, tmp_path: Path
-    ) -> None:
+    async def test_clears_failure_on_success(self, daemon: ICloudCleanupDaemon, tmp_path: Path) -> None:
         """Test that failure count is cleared on successful deletion."""
         conflict_file = tmp_path / "document 2.txt"
         conflict_file.touch()
@@ -168,12 +160,10 @@ class TestRetryLimit:
             await daemon._process_conflict(conflict)
 
         assert conflict_file not in daemon._failed_deletes
-        assert daemon.stats.conflicts_deleted == 1
+        assert daemon.stats.files_deleted == 1
 
     @pytest.mark.asyncio
-    async def test_allows_retries_under_limit(
-        self, daemon: ICloudCleanupDaemon, tmp_path: Path
-    ) -> None:
+    async def test_allows_retries_under_limit(self, daemon: ICloudCleanupDaemon, tmp_path: Path) -> None:
         """Test that files under retry limit are still processed."""
         conflict_file = tmp_path / "document 2.txt"
         conflict_file.touch()

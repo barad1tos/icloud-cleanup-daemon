@@ -136,6 +136,8 @@ class CleanupConfig:
     def _apply_modules_config(cls, config: CleanupConfig, modules_cfg: dict[str, Any]) -> None:
         """Apply modules settings from config dict."""
         disabled = modules_cfg.get("disabled", [])
+        if isinstance(disabled, str):
+            disabled = [disabled]
         if isinstance(disabled, list):
             config.modules_disabled = [str(name) for name in disabled]
 

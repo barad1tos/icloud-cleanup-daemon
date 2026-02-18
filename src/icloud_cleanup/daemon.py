@@ -37,39 +37,6 @@ class DaemonStats:
     errors: int = 0
     per_module: defaultdict[str, int] = field(default_factory=lambda: defaultdict(int))
 
-    # Backward-compat aliases
-    @property
-    def conflicts_detected(self) -> int:
-        return self.files_detected
-
-    @conflicts_detected.setter
-    def conflicts_detected(self, value: int) -> None:
-        self.files_detected = value
-
-    @property
-    def conflicts_deleted(self) -> int:
-        return self.files_deleted
-
-    @conflicts_deleted.setter
-    def conflicts_deleted(self, value: int) -> None:
-        self.files_deleted = value
-
-    @property
-    def conflicts_recovered(self) -> int:
-        return self.files_recovered
-
-    @conflicts_recovered.setter
-    def conflicts_recovered(self, value: int) -> None:
-        self.files_recovered = value
-
-    @property
-    def conflicts_skipped(self) -> int:
-        return self.files_skipped
-
-    @conflicts_skipped.setter
-    def conflicts_skipped(self, value: int) -> None:
-        self.files_skipped = value
-
 
 class ICloudCleanupDaemon:
     """Main daemon for cleaning up iCloud sync conflicts."""
@@ -192,7 +159,7 @@ class ICloudCleanupDaemon:
         # Check cooldown status
         should_skip, failure_count = self._check_cooldown_status(path, current_time)
         if should_skip:
-            self.stats.conflicts_skipped += 1
+            self.stats.files_skipped += 1
             return None
 
         # Check if the original exists
@@ -202,14 +169,14 @@ class ICloudCleanupDaemon:
                 path.name,
                 conflict.original_path.name,
             )
-            self.stats.conflicts_skipped += 1
+            self.stats.files_skipped += 1
             return None
 
         # Wait for iCloud sync to complete
         self.logger.debug("Waiting for iCloud sync: %s", path.name)
         if not await self.checker.wait_for_sync(path):
             self.logger.warning("Timeout waiting for sync: %s", path.name)
-            self.stats.conflicts_skipped += 1
+            self.stats.files_skipped += 1
             return None
 
         # Delete/recover the conflict
@@ -386,7 +353,7 @@ class ICloudCleanupDaemon:
                 # Process any pending deletes
                 await self._process_pending_deletes()
 
-                # Check for new files from watcher
+                # Check for new files from the watcher
                 while True:
                     try:
                         async with asyncio.timeout(0.1):

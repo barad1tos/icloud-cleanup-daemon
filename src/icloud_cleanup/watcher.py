@@ -85,10 +85,16 @@ class ConflictEventHandler(FileSystemEventHandler):
                 self.callback(path, detected)
                 return
 
-        # Legacy detector fallback (no DetectedFile context)
-        if conflict := self.detector.is_conflict_file(path):
-            self.logger.debug("Detected conflict file: %s", conflict.path.name)
-            self.callback(path, None)
+        # Legacy detector fallback — wrap in DetectedFile for unified pipeline
+        if self.detector.is_conflict_file(path):
+            detected = DetectedFile(
+                path=path,
+                module_name="icloud_conflicts",
+                reason="iCloud conflict (legacy detector)",
+                recovery_enabled=True,
+            )
+            self.logger.debug("Detected [legacy]: %s", path.name)
+            self.callback(path, detected)
 
 
 class FileWatcher:
