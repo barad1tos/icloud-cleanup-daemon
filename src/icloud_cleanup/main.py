@@ -302,7 +302,7 @@ def cmd_run(config: CleanupConfig, args: argparse.Namespace) -> int:  # NOSONAR
 
 
 def _dry_run(config: CleanupConfig) -> int:
-    """Show what would be deleted without actually deleting."""
+    """Show what would be deleted. Returns count of files found (0 = clean)."""
     from .modules import discover_modules
 
     console = Console()
@@ -338,7 +338,7 @@ def _dry_run(config: CleanupConfig) -> int:
 
     console.print(table)
     console.print("\n[bold]To actually run, remove --dry-run flag[/bold]")
-    return 0
+    return len(all_detected)
 
 
 def cmd_nosync(config: CleanupConfig, args: argparse.Namespace) -> int:

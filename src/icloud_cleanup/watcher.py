@@ -89,7 +89,6 @@ class ConflictEventHandler(FileSystemEventHandler):
         if conflict := self.detector.is_conflict_file(path):
             self.logger.debug("Detected conflict file: %s", conflict.path.name)
             self.callback(path, None)
-            return
 
 
 class FileWatcher:
