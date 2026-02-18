@@ -115,6 +115,10 @@ icloud-cleanup config --show    # Show config
 # Recovery
 icloud-cleanup recovery --list
 icloud-cleanup recovery --restore /path/to/file
+
+# Nosync (exclude build dirs from iCloud)
+icloud-cleanup nosync --scan     # Preview candidates
+icloud-cleanup nosync --apply    # Convert to .nosync
 ```
 
 ## Running as a Service

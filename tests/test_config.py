@@ -188,6 +188,30 @@ class TestConfigLoad:
         config = self._load_config_from_text(tmp_path, "string_bool.yaml", "recovery:\n  enabled: true\n")
         assert config.enable_recovery is True
 
+    def test_load_invalid_yaml_raises(self, tmp_path: Path) -> None:
+        """Test that malformed YAML raises ValueError with context."""
+        config_path = tmp_path / "bad.yaml"
+        config_path.write_text("watch_directories: [\n  unclosed")
+
+        with pytest.raises(ValueError, match="Invalid YAML"):
+            CleanupConfig.load(config_path)
+
+    def test_load_zero_scan_interval_raises(self, tmp_path: Path) -> None:
+        """Test that a zero scan_interval raises ValueError."""
+        config_path = tmp_path / "bad_interval.yaml"
+        config_path.write_text("scan_interval: 0\n")
+
+        with pytest.raises(ValueError, match="scan_interval must be positive"):
+            CleanupConfig.load(config_path)
+
+    def test_load_negative_poll_interval_raises(self, tmp_path: Path) -> None:
+        """Test that a negative icloud_poll_interval raises ValueError."""
+        config_path = tmp_path / "bad_poll.yaml"
+        config_path.write_text("icloud_poll_interval: -1\n")
+
+        with pytest.raises(ValueError, match="icloud_poll_interval must be positive"):
+            CleanupConfig.load(config_path)
+
     @staticmethod
     def _load_config_from_text(tmp_path: Path, filename: str, content: str) -> CleanupConfig:
         """Create a config file with given content and load it."""

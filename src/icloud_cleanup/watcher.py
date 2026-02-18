@@ -13,6 +13,9 @@ from watchdog.observers import Observer
 
 from .modules.base import DetectedFile
 
+# watchdog.observers.Observer is a dynamic ObserverType, not valid in type annotations
+_ObserverType = Any
+
 if TYPE_CHECKING:
     from watchdog.events import FileSystemEvent
 
@@ -31,15 +34,7 @@ class ConflictEventHandler(FileSystemEventHandler):
         logger: logging.Logger,
         modules: list[CleanupModule] | None = None,
     ) -> None:
-        """Initialize the event handler.
-
-        Args:
-            detector: Conflict detector instance.
-            callback: Invoked with (path, DetectedFile) when a match occurs.
-            logger: Logger instance.
-            modules: Optional list of cleanup modules with supports_watch=True.
-
-        """
+        """Wire up the detector, callback, and optional watch-capable modules."""
         super().__init__()
         self.detector = detector
         self.callback = callback
@@ -47,23 +42,13 @@ class ConflictEventHandler(FileSystemEventHandler):
         self._watch_modules = [m for m in (modules or []) if m.supports_watch]
 
     def on_created(self, event: FileSystemEvent) -> None:
-        """Handle file creation events.
-
-        Args:
-            event: File system event.
-
-        """
+        """Filter for non-directory creation events and check the path."""
         if isinstance(event, FileCreatedEvent) and not event.is_directory:
             src_path = event.src_path if isinstance(event.src_path, str) else event.src_path.decode()
             self._check_path(Path(src_path))
 
     def on_moved(self, event: FileSystemEvent) -> None:
-        """Handle file move events (iCloud often moves files).
-
-        Args:
-            event: File system event.
-
-        """
+        """Check the destination of non-directory move events (iCloud often renames via move)."""
         if isinstance(event, FileMovedEvent) and not event.is_directory:
             dest_path = event.dest_path if isinstance(event.dest_path, str) else event.dest_path.decode()
             self._check_path(Path(dest_path))
@@ -107,31 +92,17 @@ class FileWatcher:
         logger: logging.Logger,
         modules: list[CleanupModule] | None = None,
     ) -> None:
-        """Initialize the file watcher.
-
-        Args:
-            config: Cleanup configuration.
-            detector: Conflict detector instance.
-            logger: Logger instance.
-            modules: Optional list of cleanup modules for a multi-module watch.
-
-        """
+        """Set up the observer, queue, and module list for directory watching."""
         self.config = config
         self.detector = detector
         self.logger = logger
         self._modules = modules or []
-        self._observer: Any = None
+        self._observer: _ObserverType | None = None
         self._pending_queue: asyncio.Queue[tuple[Path, DetectedFile | None]] = asyncio.Queue()
         self._running = False
 
     def _on_file_detected(self, path: Path, detected: DetectedFile | None) -> None:
-        """Handle a detected file from any module.
-
-        Args:
-            path: Path to the detected file.
-            detected: DetectedFile with module context, or None for legacy matches.
-
-        """
+        """Enqueue a detected file for async processing by the daemon."""
         try:
             self._pending_queue.put_nowait((path, detected))
         except asyncio.QueueFull:
@@ -172,7 +143,6 @@ class FileWatcher:
 
     @property
     def is_running(self) -> bool:
-        """Check if the watcher is running."""
         return self._running
 
     async def get_pending(self) -> tuple[Path, DetectedFile | None]:

@@ -5,6 +5,7 @@ from __future__ import annotations
 import importlib
 import logging
 import pkgutil
+import types
 from typing import TYPE_CHECKING
 
 from .base import CleanupModule
@@ -20,41 +21,25 @@ def discover_modules(config: CleanupConfig) -> list[CleanupModule]:
 
     Scans the modules package for classes with MODULE_ENABLED = True,
     instantiates them with the config, and filters out disabled modules.
-
-    Args:
-        config: Cleanup configuration.
-
-    Returns:
-        List of instantiated cleanup modules.
-
     """
     modules: list[CleanupModule] = []
     package = importlib.import_module(__package__ or "icloud_cleanup.modules")
 
-    for _finder, modname, _is_pkg in pkgutil.iter_modules(package.__path__):
-        if modname == "base":
+    for _finder, module_name, _is_pkg in pkgutil.iter_modules(package.__path__):
+        if module_name == "base":
             continue
         try:
-            mod = importlib.import_module(f"{__package__}.{modname}")
+            mod = importlib.import_module(f"{__package__}.{module_name}")
         except ImportError:
-            logger.warning("Failed to import module: %s", modname)
+            logger.warning("Failed to import module: %s", module_name)
             continue
 
         modules.extend(_find_module_classes(mod, config))
     return modules
 
 
-def _find_module_classes(mod: object, config: CleanupConfig) -> list[CleanupModule]:
-    """Find and instantiate CleanupModule classes in a Python module.
-
-    Args:
-        mod: Imported Python module to inspect.
-        config: Cleanup configuration.
-
-    Returns:
-        List of instantiated modules from this Python module.
-
-    """
+def _find_module_classes(mod: types.ModuleType, config: CleanupConfig) -> list[CleanupModule]:
+    """Instantiate all CleanupModule classes found in the given Python module."""
     found: list[CleanupModule] = []
 
     for attr_name in dir(mod):

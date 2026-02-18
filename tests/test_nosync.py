@@ -17,21 +17,21 @@ from icloud_cleanup.nosync import (
 
 @pytest.fixture
 def config(tmp_path: Path) -> CleanupConfig:
-    """Create test configuration."""
-    cfg = CleanupConfig()
-    cfg.watch_directories = [tmp_path]
-    return cfg
+    """Create a test configuration."""
+    cleanup_config = CleanupConfig()
+    cleanup_config.watch_directories = [tmp_path]
+    return cleanup_config
 
 
 @pytest.fixture
 def logger() -> logging.Logger:
-    """Create test logger."""
+    """Create a test logger."""
     return logging.getLogger("test-nosync")
 
 
 @pytest.fixture
 def manager(config: CleanupConfig, logger: logging.Logger) -> NosyncManager:
-    """Create nosync manager."""
+    """Create a nosync manager."""
     return NosyncManager(config, logger)
 
 
@@ -62,7 +62,7 @@ class TestNosyncResult:
     """Tests for NosyncResult dataclass."""
 
     def test_success_result(self, tmp_path: Path) -> None:
-        """Test successful nosync result."""
+        """Test a successful nosync result."""
         result = NosyncResult(
             path=tmp_path / "venv",
             success=True,
@@ -74,7 +74,7 @@ class TestNosyncResult:
         assert result.error is None
 
     def test_error_result(self, tmp_path: Path) -> None:
-        """Test error nosync result."""
+        """Test an error nosync result."""
         result = NosyncResult(
             path=tmp_path / "venv",
             success=False,
@@ -90,7 +90,7 @@ class TestIsNosyncCandidate:
 
     @staticmethod
     def _assert_is_candidate(tmp_path: Path, dirname: str) -> None:
-        """Create a directory and assert it a nosync candidate."""
+        """Create a directory and assert it is a nosync candidate."""
         directory = tmp_path / dirname
         directory.mkdir(parents=True)
         assert NosyncManager.is_nosync_candidate(directory)
@@ -143,10 +143,8 @@ class TestConvertToNosync:
     """Tests for convert_to_nosync method."""
 
     @staticmethod
-    def _assert_convert_fails(
-        manager: NosyncManager, path: Path, expected_error: str
-    ) -> None:
-        """Assert that conversion fails with expected error message."""
+    def _assert_convert_fails(manager: NosyncManager, path: Path, expected_error: str) -> None:
+        """Assert that conversion fails with the expected error message."""
         result = manager.convert_to_nosync(path)
         assert not result.success
         assert result.action == "skipped"
@@ -154,7 +152,7 @@ class TestConvertToNosync:
         assert expected_error in result.error.lower()
 
     def test_convert_directory(self, manager: NosyncManager, tmp_path: Path) -> None:
-        """Test converting a directory to .nosync format."""
+        """Test converting a directory to the .nosync format."""
         venv = tmp_path / ".venv"
         venv.mkdir()
         (venv / "bin").mkdir()
@@ -166,7 +164,7 @@ class TestConvertToNosync:
         assert result.action == "converted"
         assert result.nosync_path == tmp_path / ".venv.nosync"
 
-        # Original path should now be a symlink
+        # The original path should now be a symlink
         assert venv.is_symlink()
         assert venv.resolve() == (tmp_path / ".venv.nosync").resolve()
 
@@ -175,18 +173,18 @@ class TestConvertToNosync:
         assert (tmp_path / ".venv.nosync" / "bin").exists()
 
     def test_convert_nonexistent_path(self, manager: NosyncManager, tmp_path: Path) -> None:
-        """Test converting nonexistent path fails."""
+        """Test converting a nonexistent path fails."""
         missing = tmp_path / "missing"
         self._assert_convert_fails(manager, missing, "does not exist")
 
     def test_convert_file_fails(self, manager: NosyncManager, tmp_path: Path) -> None:
-        """Test converting a file fails."""
+        """Test that converting a file fails."""
         file_path = tmp_path / "file.txt"
         file_path.touch()
         self._assert_convert_fails(manager, file_path, "not a directory")
 
     def test_convert_symlink_fails(self, manager: NosyncManager, tmp_path: Path) -> None:
-        """Test converting a symlink fails."""
+        """Test that converting a symlink fails."""
         target = tmp_path / "target"
         target.mkdir()
         link = tmp_path / "link"
@@ -219,7 +217,7 @@ class TestConvertToNosync:
 
 
 class TestScanForCandidates:
-    """Tests for scan_for_candidates method."""
+    """Tests for the scan_for_candidates method."""
 
     def test_scan_finds_candidates(self, manager: NosyncManager, tmp_path: Path) -> None:
         """Test scanning finds nosync candidates."""
@@ -257,7 +255,7 @@ class TestScanForCandidates:
         assert str(project / "src" / "__pycache__") in paths
 
     def test_scan_nonexistent_directory(self, manager: NosyncManager, tmp_path: Path) -> None:
-        """Test scanning nonexistent directory returns empty."""
+        """Test that scanning a nonexistent directory returns empty."""
         missing = tmp_path / "missing"
 
         candidates = manager.scan_for_candidates(missing)
@@ -275,13 +273,44 @@ class TestScanForCandidates:
         # Should be sorted by path
         assert candidates == sorted(candidates)
 
+    def test_scan_skips_nested_inside_candidates(self, manager: NosyncManager, tmp_path: Path) -> None:
+        """Test that scan skips directories nested inside found candidates."""
+        project = tmp_path / "project"
+        project.mkdir()
+        venv = project / ".venv"
+        venv.mkdir()
+        # Directories nested inside .venv should not be reported
+        (venv / "lib" / "python3.13" / "site-packages").mkdir(parents=True)
+        (venv / "lib" / "python3.13" / "site-packages" / "__pycache__").mkdir()
+        (venv / "lib" / "python3.13" / "site-packages" / "pkg" / "dist").mkdir(
+            parents=True,
+        )
+        # A "typeshed" stubs directory named "venv" inside .venv
+        (venv / "lib" / "typeshed" / "stdlib" / "venv").mkdir(parents=True)  # cspell:ignore typeshed
+
+        candidates = manager.scan_for_candidates(tmp_path)
+
+        assert candidates == [venv]
+
+    def test_scan_skips_inside_existing_nosync(self, manager: NosyncManager, tmp_path: Path) -> None:
+        """Test that scan skips content inside already-converted .nosync dirs."""
+        project = tmp_path / "project"
+        project.mkdir()
+        # Simulate an already-converted directory
+        nosync_dir = project / ".venv.nosync"
+        nosync_dir.mkdir()
+        (nosync_dir / "lib" / "__pycache__").mkdir(parents=True)
+        (nosync_dir / "lib" / "dist").mkdir()
+
+        candidates = manager.scan_for_candidates(tmp_path)
+
+        assert candidates == []
+
 
 class TestScanAll:
-    """Tests for scan_all method."""
+    """Tests for the scan_all method."""
 
-    def test_scan_all_watch_directories(
-        self, config: CleanupConfig, logger: logging.Logger, tmp_path: Path
-    ) -> None:
+    def test_scan_all_watch_directories(self, config: CleanupConfig, logger: logging.Logger, tmp_path: Path) -> None:
         """Test scanning all watch directories."""
         dir1 = tmp_path / "dir1"
         dir2 = tmp_path / "dir2"
@@ -298,9 +327,7 @@ class TestScanAll:
 
         assert len(candidates) == 2
 
-    def test_scan_all_empty_directories(
-        self, config: CleanupConfig, logger: logging.Logger, tmp_path: Path
-    ) -> None:
+    def test_scan_all_empty_directories(self, config: CleanupConfig, logger: logging.Logger, tmp_path: Path) -> None:
         """Test scanning empty watch directories."""
         empty_dir = tmp_path / "empty"
         empty_dir.mkdir()

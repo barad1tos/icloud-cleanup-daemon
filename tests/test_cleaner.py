@@ -264,7 +264,7 @@ class TestRecoveryCleanup:
 
         cleaned = cleaner.cleanup_recovery_dir()
 
-        # Dirs >= 1 day old are removed (old=2d, boundary=1d), today's dir survives
+        # Dirs >= 1 day old are removed (old=2d, boundary=1d); today's dir survives
         assert cleaned == 2
         assert not old_dir.exists()
         assert not boundary_dir.exists()

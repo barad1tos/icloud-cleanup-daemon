@@ -6,7 +6,7 @@ coverage.py runs when the merged .coverage database exists.
 
 from __future__ import annotations
 
-import contextlib
+import logging
 import re
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -18,6 +18,8 @@ if TYPE_CHECKING:
 
 _PATTERN = re.compile(r"^\.coverage\..+\.pid\d+\..+$")
 _SKIP_DIRS = frozenset({".git", ".venv", "venv", "node_modules", ".tox", "__pycache__"})
+
+logger = logging.getLogger(__name__)
 
 
 class CoverageArtifactsModule:
@@ -36,12 +38,6 @@ class CoverageArtifactsModule:
         A file matches when:
         1. Its name matches .coverage.<host>.pid<N>.<hash>
         2. A merged .coverage file exists in the same directory
-
-        Args:
-            path: Path to check.
-
-        Returns:
-            DetectedFile if the file is a stale artifact, None otherwise.
 
         """
         if not path.is_file():
@@ -62,36 +58,30 @@ class CoverageArtifactsModule:
         )
 
     def scan_directory(self, directory: Path) -> list[DetectedFile]:
-        """Scan a directory for stale coverage artifacts.
-
-        Args:
-            directory: Directory to scan.
-
-        Returns:
-            List of detected coverage artifacts.
-
-        """
+        """Scan a directory for stale coverage artifacts."""
         detected: list[DetectedFile] = []
 
         if not directory.exists():
             return detected
 
-        with contextlib.suppress(PermissionError):
+        try:
             for path in directory.rglob(".*"):
                 if any(part in _SKIP_DIRS for part in path.parts):
                     continue
-                if result := self.is_target(path):
+                try:
+                    result = self.is_target(path)
+                except PermissionError:
+                    logger.debug("Permission denied checking: %s", path)
+                    continue
+                if result:
                     detected.append(result)
+        except PermissionError:
+            logger.warning("Permission denied scanning: %s", directory)
 
         return detected
 
     def scan_all(self) -> list[DetectedFile]:
-        """Scan all configured watch directories.
-
-        Returns:
-            List of all detected coverage artifacts.
-
-        """
+        """Scan all configured watch directories."""
         all_detected: list[DetectedFile] = []
 
         for directory in self.config.watch_directories:

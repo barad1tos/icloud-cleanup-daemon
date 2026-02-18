@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import contextlib
+import logging
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -13,10 +13,12 @@ from .base import DetectedFile
 if TYPE_CHECKING:
     from ..config import CleanupConfig
 
+logger = logging.getLogger(__name__)
+
 
 @dataclass
 class ConflictFile:
-    """Represents an iCloud sync conflict file."""
+    """Parsed components of an iCloud conflict filename (original name, number, extension)."""
 
     path: Path
     original_name: str
@@ -45,15 +47,7 @@ class ICloudConflictsModule:
         self._pattern = re.compile(config.conflict_pattern)
 
     def _match_conflict(self, path: Path) -> ConflictFile | None:
-        """Match a path against the conflict pattern.
-
-        Args:
-            path: Path to check.
-
-        Returns:
-            ConflictFile if it matches, None otherwise.
-
-        """
+        """Match a path against the conflict pattern."""
         if not path.is_file():
             return None
 
@@ -73,15 +67,7 @@ class ICloudConflictsModule:
         )
 
     def is_target(self, path: Path) -> DetectedFile | None:
-        """Check if a path is an iCloud conflict file with an existing original.
-
-        Args:
-            path: Path to check.
-
-        Returns:
-            DetectedFile if it's a valid conflict, None otherwise.
-
-        """
+        """Check if a path is an iCloud conflict file with an existing original."""
         conflict = self._match_conflict(path)
         if conflict is None:
             return None
@@ -97,34 +83,28 @@ class ICloudConflictsModule:
         )
 
     def scan_directory(self, directory: Path) -> list[DetectedFile]:
-        """Scan a directory for conflict files.
-
-        Args:
-            directory: Directory to scan.
-
-        Returns:
-            List of detected conflict files.
-
-        """
+        """Scan a directory for conflict files."""
         detected: list[DetectedFile] = []
 
         if not directory.exists():
             return detected
 
-        with contextlib.suppress(PermissionError):
+        try:
             for path in directory.rglob("*"):
-                if result := self.is_target(path):
+                try:
+                    result = self.is_target(path)
+                except PermissionError:
+                    logger.debug("Permission denied checking: %s", path)
+                    continue
+                if result:
                     detected.append(result)
+        except PermissionError:
+            logger.warning("Permission denied scanning: %s", directory)
 
         return detected
 
     def scan_all(self) -> list[DetectedFile]:
-        """Scan all configured watch directories.
-
-        Returns:
-            List of all detected conflict files.
-
-        """
+        """Scan all configured watch directories."""
         all_detected: list[DetectedFile] = []
 
         for directory in self.config.watch_directories:
@@ -132,16 +112,6 @@ class ICloudConflictsModule:
 
         return all_detected
 
-    # Backward-compat helpers for code that still uses ConflictFile
-
     def get_conflict_file(self, path: Path) -> ConflictFile | None:
-        """Get ConflictFile for a path (for backward compatibility).
-
-        Args:
-            path: Path to check.
-
-        Returns:
-            ConflictFile if it matches the pattern, None otherwise.
-
-        """
+        """Get ConflictFile for a path (for backward compatibility)."""
         return self._match_conflict(path)

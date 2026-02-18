@@ -11,7 +11,7 @@ import yaml
 
 
 def parse_bool(value: Any, default: bool) -> bool:
-    """Parse a boolean value from config, handling string representations."""
+    """Coerce YAML string representations ('true', 'yes', 'on', '1') to bool."""
     if value is None:
         return default
     if isinstance(value, bool):
@@ -23,7 +23,7 @@ def parse_bool(value: Any, default: bool) -> bool:
 
 @dataclass
 class CleanupConfig:
-    """Configuration for the iCloud cleanup daemon."""
+    """YAML-backed settings for watch directories, recovery, and module toggles."""
 
     # Directories to monitor for iCloud conflicts
     watch_directories: list[Path] = field(default_factory=list)
@@ -61,21 +61,12 @@ class CleanupConfig:
 
     @classmethod
     def get_config_path(cls) -> Path:
-        """Get the default configuration file path."""
+        """Return the platform-specific default config file path (macOS Application Support)."""
         return Path.home() / "Library/Application Support/icloud-cleanup/config.yaml"
 
     @classmethod
     def load(cls, config_path: Path | None = None) -> CleanupConfig:
-        """Load configuration from the YAML file.
-
-        Args:
-            config_path: Path to a config file.
-            Use default if None.
-
-        Returns:
-            Loaded configuration.
-
-        """
+        """Load configuration from a YAML file, falling back to defaults if absent."""
         if config_path is None:
             config_path = cls.get_config_path()
 
@@ -85,8 +76,12 @@ class CleanupConfig:
             config.watch_directories = cls._get_default_watch_directories()
             return config
 
-        with config_path.open(encoding="utf-8") as f:
-            data = yaml.safe_load(f) or {}
+        try:
+            with config_path.open(encoding="utf-8") as f:
+                data = yaml.safe_load(f) or {}
+        except yaml.YAMLError as exc:
+            msg = f"Invalid YAML in {config_path}: {exc}"
+            raise ValueError(msg) from exc
 
         return cls._from_dict(data)
 
@@ -115,7 +110,22 @@ class CleanupConfig:
         cls._apply_logging_config(config, data.get("logging", {}))
         cls._apply_modules_config(config, data.get("modules", {}))
 
+        cls._validate(config)
+
         return config
+
+    @staticmethod
+    def _validate(config: CleanupConfig) -> None:
+        """Guard against misconfigured intervals that cause infinite loops or hangs."""
+        if config.scan_interval <= 0:
+            msg = f"scan_interval must be positive, got {config.scan_interval}"
+            raise ValueError(msg)
+        if config.wait_before_delete < 0:
+            msg = f"wait_before_delete must be non-negative, got {config.wait_before_delete}"
+            raise ValueError(msg)
+        if config.icloud_poll_interval <= 0:
+            msg = f"icloud_poll_interval must be positive, got {config.icloud_poll_interval}"
+            raise ValueError(msg)
 
     @classmethod
     def _apply_recovery_config(cls, config: CleanupConfig, recovery: dict[str, Any]) -> None:
@@ -156,13 +166,7 @@ class CleanupConfig:
         return directories
 
     def save(self, config_path: Path | None = None) -> None:
-        """Save configuration to the YAML file.
-
-        Args:
-            config_path: Path to save config.
-            Use default if None.
-
-        """
+        """Serialize current settings to a YAML file, creating parent directories as needed."""
         if config_path is None:
             config_path = self.get_config_path()
 

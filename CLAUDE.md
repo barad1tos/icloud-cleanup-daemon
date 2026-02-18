@@ -105,6 +105,8 @@ uv run pytest tests/test_detector.py
 
 Tests use `tmp_path` fixture for isolated file system operations.
 
+Key test areas: config validation (YAML errors, invalid intervals), daemon retry/cooldown logic, iCloud status (xattr timeouts, subprocess errors), watcher FSEvents handling, and module auto-discovery.
+
 ## Common Pitfalls
 
 When modifying this codebase, watch out for:
