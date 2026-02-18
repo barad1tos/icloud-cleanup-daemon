@@ -16,7 +16,7 @@ from icloud_cleanup.detector import ConflictFile
 
 @pytest.fixture
 def config(tmp_path: Path) -> CleanupConfig:
-    """Create test configuration."""
+    """Create a test configuration."""
     cfg = CleanupConfig()
     cfg.watch_directories = [tmp_path]
     cfg.log_file = tmp_path / "test.log"
@@ -27,12 +27,12 @@ def config(tmp_path: Path) -> CleanupConfig:
 
 @pytest.fixture
 def daemon(config: CleanupConfig) -> ICloudCleanupDaemon:
-    """Create daemon instance."""
+    """Create a daemon instance."""
     return ICloudCleanupDaemon(config)
 
 
 def _make_conflict(path: Path) -> ConflictFile:
-    """Create a ConflictFile object for testing."""
+    """Create a ``ConflictFile`` object for testing."""
     return ConflictFile(
         path=path,
         original_name=path.stem.rsplit(" ", 1)[0],

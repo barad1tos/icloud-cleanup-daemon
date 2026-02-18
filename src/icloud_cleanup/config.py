@@ -156,7 +156,7 @@ class CleanupConfig:
         return directories
 
     def save(self, config_path: Path | None = None) -> None:
-        """Save configuration to YAML file.
+        """Save configuration to the YAML file.
 
         Args:
             config_path: Path to save config.

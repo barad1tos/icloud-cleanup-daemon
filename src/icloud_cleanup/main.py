@@ -303,7 +303,7 @@ def cmd_run(config: CleanupConfig, args: argparse.Namespace) -> int:  # NOSONAR
 
 
 def _dry_run(config: CleanupConfig) -> int:
-    """Show what would be deleted. Returns 1 if files found, 0 if clean."""
+    """Show what would be deleted. Returns 1 if files are found, 0 if clean."""
     from .modules import discover_modules
 
     console = Console()

@@ -16,7 +16,7 @@ from icloud_cleanup.detector import ConflictFile
 
 @pytest.fixture
 def config(tmp_path: Path) -> CleanupConfig:
-    """Create test configuration with temp recovery directory."""
+    """Create a test configuration with a temp recovery directory."""
     cfg = CleanupConfig()
     cfg.recovery_dir = tmp_path / "recovery"
     cfg.enable_recovery = True
@@ -26,18 +26,18 @@ def config(tmp_path: Path) -> CleanupConfig:
 
 @pytest.fixture
 def logger() -> logging.Logger:
-    """Create test logger."""
+    """Create a test logger."""
     return logging.getLogger("test-cleaner")
 
 
 @pytest.fixture
 def cleaner(config: CleanupConfig, logger: logging.Logger) -> Cleaner:
-    """Create cleaner instance."""
+    """Create a cleaner instance."""
     return Cleaner(config, logger)
 
 
 def _make_conflict(path: Path) -> ConflictFile:
-    """Create a ConflictFile object for testing."""
+    """Create a ``ConflictFile`` object for testing."""
     return ConflictFile(
         path=path,
         original_name=path.stem.rsplit(" ", 1)[0],
@@ -50,7 +50,7 @@ class TestCleanupResult:
     """Tests for CleanupResult dataclass."""
 
     def test_success_result(self, tmp_path: Path) -> None:
-        """Test successful cleanup result."""
+        """Test a successful cleanup result."""
         result = CleanupResult(
             path=tmp_path / "file.txt",
             success=True,
@@ -61,7 +61,7 @@ class TestCleanupResult:
         assert result.error is None
 
     def test_error_result(self, tmp_path: Path) -> None:
-        """Test error cleanup result."""
+        """Test an error cleanup result."""
         result = CleanupResult(
             path=tmp_path / "file.txt",
             success=False,
@@ -121,7 +121,7 @@ class TestDeleteConflict:
         assert "no longer exists" in result.error.lower()
 
     def test_delete_with_recovery(self, cleaner: Cleaner, config: CleanupConfig, tmp_path: Path) -> None:
-        """Test deletion with recovery enabled moves file."""
+        """Test that deletion with recovery enabled moves the file."""
         conflict_file = tmp_path / "document 2.txt"
         conflict_file.write_text("test content")
         conflict = _make_conflict(conflict_file)
@@ -133,7 +133,7 @@ class TestDeleteConflict:
         assert result.recovery_path.read_text() == "test content"
 
     def test_delete_without_recovery(self, config: CleanupConfig, logger: logging.Logger, tmp_path: Path) -> None:
-        """Test deletion with recovery disabled permanently deletes."""
+        """Test that deletion with recovery disabled permanently deletes."""
         config.enable_recovery = False
         config.recovery_dir = tmp_path / "recovery"
         cleaner = Cleaner(config, logger)
@@ -148,7 +148,7 @@ class TestDeleteConflict:
 
     @staticmethod
     def _delete_and_verify_action(cleaner: Cleaner, conflict: ConflictFile, expected_action: str) -> CleanupResult:
-        """Delete conflict with protection bypassed and verify action."""
+        """Delete a conflict with protection bypassed and verify the action."""
         with patch.object(cleaner, "is_path_protected", return_value=False):
             result = cleaner.delete_conflict(conflict)
         assert result.success
@@ -272,7 +272,7 @@ class TestRecoveryCleanup:
 
     @staticmethod
     def _create_dated_recovery_dir(config: CleanupConfig, days_ago: int, filename: str) -> Path:
-        """Create a dated recovery directory with a test file."""
+        """Create a dated recovery directory with a test file inside."""
         date = datetime.now(UTC) - timedelta(days=days_ago)
         date_dir = config.recovery_dir / date.strftime("%Y-%m-%d")
         date_dir.mkdir(parents=True)
@@ -325,7 +325,7 @@ class TestRestoreFile:
     """Tests for file restoration."""
 
     def test_restore_to_destination(self, cleaner: Cleaner, config: CleanupConfig, tmp_path: Path) -> None:
-        """Test restoring file to a specific destination."""
+        """Test restoring a file to a specific destination."""
         # Create file in recovery
         date_dir = config.recovery_dir / datetime.now(UTC).strftime("%Y-%m-%d")
         date_dir.mkdir(parents=True)
@@ -340,13 +340,13 @@ class TestRestoreFile:
         assert destination.read_text() == "restored content"
 
     def test_restore_nonexistent_file(self, cleaner: Cleaner, tmp_path: Path) -> None:
-        """Test restoring nonexistent file fails."""
+        """Test that restoring a nonexistent file fails."""
         missing = tmp_path / "missing.txt"
         success = cleaner.restore_file(missing)
         assert not success
 
     def test_restore_to_default_location(self, cleaner: Cleaner, config: CleanupConfig) -> None:
-        """Test restoring file to default location."""
+        """Test restoring a file to the default location."""
         # Create file in recovery with hash prefix
         date_dir = config.recovery_dir / datetime.now(UTC).strftime("%Y-%m-%d")
         date_dir.mkdir(parents=True)
@@ -368,12 +368,12 @@ class TestListRecoverableFiles:
     """Tests for listing recoverable files."""
 
     def test_list_empty_recovery(self, cleaner: Cleaner) -> None:
-        """Test listing empty recovery directory."""
+        """Test listing an empty recovery directory."""
         files = cleaner.list_recoverable_files()
         assert files == []
 
     def test_list_files_sorted_by_date(self, cleaner: Cleaner, config: CleanupConfig) -> None:
-        """Test files are sorted by date (newest first)."""
+        """Test that files are sorted by date (newest first)."""
         # Create files on different dates
         old_date = datetime.now(UTC) - timedelta(days=5)
         new_date = datetime.now(UTC) - timedelta(days=1)
@@ -394,7 +394,7 @@ class TestListRecoverableFiles:
         assert "old.txt" in files[1][0].name
 
     def test_list_ignores_invalid_dirs(self, cleaner: Cleaner, config: CleanupConfig) -> None:
-        """Test listing ignores invalid date directories."""
+        """Test that listing ignores invalid date directories."""
         # Create invalid directory
         invalid_dir = config.recovery_dir / "invalid"
         invalid_dir.mkdir(parents=True)

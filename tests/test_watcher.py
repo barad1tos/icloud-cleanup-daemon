@@ -18,7 +18,7 @@ from icloud_cleanup.watcher import ConflictEventHandler, FileWatcher
 
 @pytest.fixture
 def config(tmp_path: Path) -> CleanupConfig:
-    """Create test configuration."""
+    """Create a test configuration."""
     cfg = CleanupConfig()
     cfg.watch_directories = [tmp_path]
     return cfg
@@ -26,19 +26,19 @@ def config(tmp_path: Path) -> CleanupConfig:
 
 @pytest.fixture
 def detector(config: CleanupConfig) -> ConflictDetector:
-    """Create conflict detector."""
+    """Create a conflict detector."""
     return ConflictDetector(config)
 
 
 @pytest.fixture
 def logger() -> logging.Logger:
-    """Create test logger."""
+    """Create a test logger."""
     return logging.getLogger("test-watcher")
 
 
 @pytest.fixture
 def watcher(config: CleanupConfig, detector: ConflictDetector, logger: logging.Logger) -> FileWatcher:
-    """Create file watcher."""
+    """Create a file watcher."""
     return FileWatcher(config, detector, logger)
 
 
@@ -46,7 +46,7 @@ class TestConflictEventHandler:
     """Tests for ConflictEventHandler."""
 
     def test_on_created_conflict_file(self, detector: ConflictDetector, logger: logging.Logger, tmp_path: Path) -> None:
-        """Test handling of created conflict file."""
+        """Test handling of a created conflict file."""
         callback_paths: list[Path] = []
 
         def callback(path: Path, _detected: DetectedFile | None) -> None:
@@ -68,7 +68,7 @@ class TestConflictEventHandler:
         assert callback_paths[0] == conflict_file
 
     def test_on_created_regular_file(self, detector: ConflictDetector, logger: logging.Logger, tmp_path: Path) -> None:
-        """Test that regular files don't trigger callback."""
+        """Test that regular files don't trigger the callback."""
         callback_paths: list[Path] = []
 
         def callback(path: Path, _detected: DetectedFile | None) -> None:
@@ -107,7 +107,7 @@ class TestConflictEventHandler:
         assert not callback_paths
 
     def test_on_moved_conflict_file(self, detector: ConflictDetector, logger: logging.Logger, tmp_path: Path) -> None:
-        """Test handling of moved file becoming conflict."""
+        """Test handling of a moved file becoming a conflict."""
         callback_paths: list[Path] = []
 
         def callback(path: Path, _detected: DetectedFile | None) -> None:
@@ -178,12 +178,12 @@ class TestFileWatcher:
     """Tests for FileWatcher."""
 
     def test_initial_state(self, watcher: FileWatcher) -> None:
-        """Test initial watcher state."""
+        """Test the initial watcher state."""
         assert not watcher.is_running
         assert watcher._observer is None
 
     def test_start_stop(self, watcher: FileWatcher) -> None:
-        """Test starting and stopping watcher."""
+        """Test starting and stopping the watcher."""
         watcher.start()
         assert watcher.is_running
         assert watcher._observer is not None
@@ -233,7 +233,7 @@ class TestFileWatcher:
 
     @pytest.mark.asyncio
     async def test_get_pending(self, watcher: FileWatcher, tmp_path: Path) -> None:
-        """Test getting pending item from queue."""
+        """Test getting a pending item from the queue."""
         conflict_path = tmp_path / "document 2.txt"
         conflict_path.touch()
 
@@ -256,7 +256,7 @@ class TestFileWatcher:
         assert watcher._pending_queue.empty()
 
     def test_clear_pending_empty_queue(self, watcher: FileWatcher) -> None:
-        """Test clearing already empty queue."""
+        """Test clearing an already empty queue."""
         count = watcher.clear_pending()
         assert count == 0
 
@@ -293,7 +293,7 @@ class TestFileWatcher:
     def _start_and_verify_schedule_count(
         mock_observer_class: MagicMock, watcher: FileWatcher, expected_count: int
     ) -> None:
-        """Start watcher with mock observer and verify schedule call count."""
+        """Start the watcher with a mock observer and verify the schedule call count."""
         mock_observer = MagicMock()
         mock_observer_class.return_value = mock_observer
         watcher.start()
@@ -312,7 +312,7 @@ class TestWatcherIntegration:
         logger: logging.Logger,
         tmp_path: Path,
     ) -> None:
-        """Test that watcher detects newly created conflict files."""
+        """Test that the watcher detects newly created conflict files."""
         config.watch_directories = [tmp_path]
         watcher = FileWatcher(config, detector, logger)
 

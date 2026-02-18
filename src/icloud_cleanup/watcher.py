@@ -35,7 +35,7 @@ class ConflictEventHandler(FileSystemEventHandler):
 
         Args:
             detector: Conflict detector instance.
-            callback: Called with (path, detected) when a file matches.
+            callback: Invoked with (path, DetectedFile) when a match occurs.
             logger: Logger instance.
             modules: Optional list of cleanup modules with supports_watch=True.
 
@@ -73,7 +73,7 @@ class ConflictEventHandler(FileSystemEventHandler):
 
         Iterates all watch-capable modules first, then falls back to the
         legacy detector. The first match wins. DetectedFile context is
-        passed through the callback so the daemon preserves module info.
+        passed through the callback, so the daemon preserves module info.
 
         Args:
             path: Path to check.
@@ -85,7 +85,7 @@ class ConflictEventHandler(FileSystemEventHandler):
                 self.callback(path, detected)
                 return
 
-        # Legacy detector fallback — wrap in DetectedFile for unified pipeline
+        # Legacy detector fallback — wrap in a DetectedFile for the unified pipeline
         if self.detector.is_conflict_file(path):
             detected = DetectedFile(
                 path=path,
@@ -179,7 +179,7 @@ class FileWatcher:
         """Get a pending detected file from the queue.
 
         Returns:
-            Tuple of (path, DetectedFile or None for legacy matches).
+            Tuple of the path, and DetectedFile or None for legacy matches.
 
         """
         return await self._pending_queue.get()
