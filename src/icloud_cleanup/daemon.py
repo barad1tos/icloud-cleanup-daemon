@@ -27,7 +27,7 @@ if TYPE_CHECKING:
 
 @dataclass
 class DaemonStats:
-    """Statistics for the daemon."""
+    """Runtime counters for a single daemon session."""
 
     start_time: datetime
     files_detected: int = 0
@@ -42,12 +42,6 @@ class ICloudCleanupDaemon:
     """Main daemon for cleaning up iCloud sync conflicts."""
 
     def __init__(self, config: CleanupConfig) -> None:
-        """Initialize the daemon.
-
-        Args:
-            config: Cleanup configuration.
-
-        """
         self.config = config
         self.logger = self._setup_logging()
         self.console = Console()
@@ -73,14 +67,13 @@ class ICloudCleanupDaemon:
         self._failed_deletes: dict[Path, tuple[int, float]] = {}  # (count, timestamp)
 
     def _setup_logging(self) -> logging.Logger:
-        """Set up logging for the daemon.
-
-        Returns:
-            Configured logger instance.
-
-        """
         logger = logging.getLogger("icloud-cleanup")
-        logger.setLevel(getattr(logging, self.config.log_level))
+
+        valid_levels = logging.getLevelNamesMapping()
+        if self.config.log_level not in valid_levels:
+            msg = f"Invalid log_level '{self.config.log_level}', expected one of {sorted(valid_levels)}"
+            raise ValueError(msg)
+        logger.setLevel(valid_levels[self.config.log_level])
 
         # Clear existing handlers to avoid duplicates if the daemon is recreated
         if logger.handlers:
@@ -105,15 +98,7 @@ class ICloudCleanupDaemon:
         return logger
 
     async def _process_detected(self, detected: DetectedFile) -> CleanupResult | None:
-        """Process a detected file from any module.
-
-        Args:
-            detected: Detected file to process.
-
-        Returns:
-            Cleanup result, or None if skipped.
-
-        """
+        """Wait for iCloud sync (if needed), then delete a detected file."""
         path = detected.path
         current_time = asyncio.get_running_loop().time()
 
@@ -144,15 +129,7 @@ class ICloudCleanupDaemon:
         return result
 
     async def _process_conflict(self, conflict: ConflictFile) -> CleanupResult | None:
-        """Process a single conflict file (backward-compat wrapper).
-
-        Args:
-            conflict: Conflict file to process.
-
-        Returns:
-            Cleanup result, or None if skipped.
-
-        """
+        """Backward-compat wrapper: wait for iCloud sync, then delete a conflict."""
         path = conflict.path
         current_time = asyncio.get_running_loop().time()
 
@@ -188,16 +165,7 @@ class ICloudCleanupDaemon:
         return result
 
     def _check_cooldown_status(self, path: Path, current_time: float) -> tuple[bool, int]:
-        """Check if a file is in cooldown and return its failure count.
-
-        Args:
-            path: Path to check.
-            current_time: Current loop time.
-
-        Returns:
-            Tuple of (should_skip, failure_count).
-
-        """
+        """Return ``(should_skip, failure_count)`` for a path's retry cooldown."""
         if path not in self._failed_deletes:
             return False, 0
 
@@ -222,15 +190,6 @@ class ICloudCleanupDaemon:
     def _update_stats_after_delete(
         self, path: Path, result: CleanupResult, failure_count: int, current_time: float
     ) -> None:
-        """Update stats and failure tracking after a deletion attempt.
-
-        Args:
-            path: Path that was processed.
-            result: Result of the deletion attempt.
-            failure_count: Number of prior failures for this path.
-            current_time: Current loop time.
-
-        """
         if result.success:
             if result.action == "deleted":
                 self.stats.files_deleted += 1
@@ -296,12 +255,7 @@ class ICloudCleanupDaemon:
                     )
 
     async def run_once(self) -> list[CleanupResult]:
-        """Run a single cleanup pass.
-
-        Returns:
-            List of cleanup results.
-
-        """
+        """Run a single cleanup pass across all modules."""
         self.logger.info("Starting single cleanup pass...")
         results: list[CleanupResult] = []
 
@@ -387,11 +341,9 @@ class ICloudCleanupDaemon:
             )
 
     def _handle_shutdown(self) -> None:
-        """Handle shutdown signal."""
         self.logger.info("Shutdown signal received")
         self._running = False
 
     def stop(self) -> None:
-        """Stop the daemon."""
         self._running = False
         self.watcher.stop()

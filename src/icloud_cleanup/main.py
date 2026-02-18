@@ -21,12 +21,7 @@ if TYPE_CHECKING:
 
 
 def parse_args() -> argparse.Namespace:
-    """Parse command line arguments.
-
-    Returns:
-        Parsed arguments.
-
-    """
+    """Build the CLI argument parser and return parsed arguments."""
     parser = argparse.ArgumentParser(
         prog="icloud-cleanup",
         description="Daemon for cleaning up iCloud sync conflict files",
@@ -125,16 +120,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def cmd_scan(config: CleanupConfig, args: argparse.Namespace) -> int:  # NOSONAR
-    """Execute scan command.
-
-    Args:
-        config: Cleanup configuration.
-        args: Parsed arguments.
-
-    Returns:
-        Exit code.
-
-    """
+    """Scan for cleanup candidates and display results as a table."""
     from .modules import discover_modules
 
     console = Console()
@@ -170,16 +156,7 @@ def cmd_scan(config: CleanupConfig, args: argparse.Namespace) -> int:  # NOSONAR
 
 
 def cmd_config(config: CleanupConfig, args: argparse.Namespace) -> int:
-    """Execute config command.
-
-    Args:
-        config: Cleanup configuration.
-        args: Parsed arguments.
-
-    Returns:
-        Exit code.
-
-    """
+    """Initialize or display the configuration file."""
     console = Console()
 
     if args.init:
@@ -218,16 +195,7 @@ def _print_config(config: CleanupConfig, console: Console) -> int:  # NOSONAR
 
 
 def cmd_recovery(config: CleanupConfig, args: argparse.Namespace) -> int:
-    """Execute recovery command.
-
-    Args:
-        config: Cleanup configuration.
-        args: Parsed arguments.
-
-    Returns:
-        Exit code.
-
-    """
+    """List, restore, or clean up recovered files."""
     from .cleaner import Cleaner
 
     console = Console()
@@ -276,16 +244,7 @@ def _list_recovery_files(cleaner: Cleaner, console: Console) -> int:  # NOSONAR
 
 
 def cmd_run(config: CleanupConfig, args: argparse.Namespace) -> int:  # NOSONAR
-    """Execute the run command.
-
-    Args:
-        config: Cleanup configuration.
-        args: Parsed arguments.
-
-    Returns:
-        Exit code.
-
-    """
+    """Launch the daemon in continuous, one-shot, or dry-run mode."""
     # Handle dry-run mode
     if getattr(args, "dry_run", False):
         return _dry_run(config)
@@ -343,16 +302,7 @@ def _dry_run(config: CleanupConfig) -> int:
 
 
 def cmd_nosync(config: CleanupConfig, args: argparse.Namespace) -> int:
-    """Execute nosync command.
-
-    Args:
-        config: Cleanup configuration.
-        args: Parsed arguments.
-
-    Returns:
-        Exit code.
-
-    """
+    """Scan for or convert directories that should be excluded from iCloud sync."""
     from .nosync import NosyncManager
 
     console = Console()
@@ -400,12 +350,7 @@ def _print_nosync_candidates(candidates: list[Path], console: Console, args: arg
 
 
 def main() -> int:
-    """Main entry point.
-
-    Returns:
-        Exit code.
-
-    """
+    """Dispatch CLI arguments to the appropriate subcommand handler."""
     args = parse_args()
     config = CleanupConfig.load(args.config)
 

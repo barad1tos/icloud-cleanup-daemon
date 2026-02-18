@@ -8,12 +8,14 @@ import shutil
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 if TYPE_CHECKING:
     from .config import CleanupConfig
     from .detector import ConflictFile
     from .modules.base import DetectedFile
+
+CleanupAction = Literal["deleted", "recovered", "skipped", "error"]
 
 
 @dataclass
@@ -22,7 +24,7 @@ class CleanupResult:
 
     path: Path
     success: bool
-    action: str  # "deleted", "recovered", "skipped", "error"
+    action: CleanupAction
     recovery_path: Path | None = None
     error: str | None = None
 
@@ -46,27 +48,12 @@ class Cleaner:
     )
 
     def __init__(self, config: CleanupConfig, logger: logging.Logger) -> None:
-        """Initialize the cleaner.
-
-        Args:
-            config: Cleanup configuration.
-            logger: Logger instance.
-
-        """
         self.config = config
         self.logger = logger
         self._ensure_recovery_dir()
 
     def is_path_protected(self, path: Path) -> bool:
-        """Check if a path is in a protected directory.
-
-        Args:
-            path: Path to check.
-
-        Returns:
-            True if the path is protected and should not be deleted.
-
-        """
+        """Guard against accidental deletion of macOS system directories."""
         resolved = path.resolve()
         resolved_str = str(resolved)
         home_str = str(Path.home())
@@ -81,20 +68,11 @@ class Cleaner:
         )
 
     def _ensure_recovery_dir(self) -> None:
-        """Ensure the recovery directory exists."""
         if self.config.enable_recovery:
             self.config.recovery_dir.mkdir(parents=True, exist_ok=True)
 
     def _get_recovery_path(self, file_path: Path) -> Path:
-        """Generate a unique recovery path for a file.
-
-        Args:
-            file_path: Path to the file being recovered.
-
-        Returns:
-            Path where the file will be stored for recovery.
-
-        """
+        """Generate a unique recovery path under ``recovery_dir/YYYY-MM-DD/``."""
         date_dir = datetime.now(UTC).strftime("%Y-%m-%d")
         recovery_subdir = self.config.recovery_dir / date_dir
         recovery_subdir.mkdir(parents=True, exist_ok=True)
@@ -111,15 +89,7 @@ class Cleaner:
         return recovery_path
 
     def delete_detected(self, detected: DetectedFile) -> CleanupResult:
-        """Delete a detected file, respecting its recovery_enabled flag.
-
-        Args:
-            detected: Detected file to delete.
-
-        Returns:
-            CleanupResult with operation details.
-
-        """
+        """Delete a detected file, respecting its recovery_enabled flag."""
         path = detected.path
         use_recovery = detected.recovery_enabled and self.config.enable_recovery
         return self._delete_path(path, use_recovery=use_recovery)
@@ -127,30 +97,15 @@ class Cleaner:
     def delete_conflict(self, conflict: ConflictFile, *, force: bool = False) -> CleanupResult:
         """Delete a conflict file, optionally moving to recovery.
 
-        Backward-compatible wrapper around _delete_path.
-
         Args:
             conflict: Conflict file to delete.
             force: If True, skip recovery and delete immediately.
-
-        Returns:
-            CleanupResult with operation details.
 
         """
         use_recovery = self.config.enable_recovery and not force
         return self._delete_path(conflict.path, use_recovery=use_recovery)
 
     def _delete_path(self, path: Path, *, use_recovery: bool) -> CleanupResult:
-        """Core deletion logic for a file path.
-
-        Args:
-            path: Path to delete.
-            use_recovery: Whether to move to recovery instead of deleting.
-
-        Returns:
-            CleanupResult with operation details.
-
-        """
         if not path.exists():
             return CleanupResult(
                 path=path,
@@ -206,10 +161,10 @@ class Cleaner:
             )
 
     def cleanup_recovery_dir(self) -> int:
-        """Remove files older than the retention period from the recovery directory.
+        """Remove date-directories older than the retention period.
 
         Returns:
-            Number of files cleaned up.
+            Number of expired directories removed.
 
         """
         if not self.config.enable_recovery:
@@ -244,16 +199,7 @@ class Cleaner:
         return cleaned
 
     def restore_file(self, recovery_path: Path, destination: Path | None = None) -> bool:
-        """Restore a file from recovery.
-
-        Args:
-            recovery_path: Path to a file in the recovery directory.
-            destination: Where to restore. If None, attempts to restore to the original location.
-
-        Returns:
-            True if restoration is successful.
-
-        """
+        """Copy a file from recovery to *destination* (default: ``~/Desktop/Restored/``)."""
         if not recovery_path.exists():
             self.logger.error("Recovery file not found: %s", recovery_path)
             return False
@@ -276,12 +222,7 @@ class Cleaner:
             return False
 
     def list_recoverable_files(self) -> list[tuple[Path, datetime]]:
-        """List all files in the recovery directory.
-
-        Returns:
-            List of (path, date) tuples for recoverable files.
-
-        """
+        """List all files in the recovery directory, newest first."""
         files: list[tuple[Path, datetime]] = []
 
         if not self.config.recovery_dir.exists():
@@ -298,4 +239,4 @@ class Cleaner:
                     continue
 
                 files.extend((file_path, dir_date) for file_path in date_dir.iterdir() if file_path.is_file())
-        return sorted(files, key=lambda x: x[1], reverse=True)
+        return sorted(files, key=lambda entry: entry[1], reverse=True)

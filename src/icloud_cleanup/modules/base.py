@@ -9,7 +9,7 @@ from typing import Protocol, runtime_checkable
 
 @dataclass(frozen=True)
 class DetectedFile:
-    """A file detected by a cleanup module."""
+    """Immutable record of a file flagged for cleanup, with module provenance."""
 
     path: Path
     module_name: str
@@ -19,7 +19,7 @@ class DetectedFile:
 
 @runtime_checkable
 class CleanupModule(Protocol):
-    """Protocol that all cleanup modules must implement."""
+    """Interface for pluggable file-detection strategies."""
 
     MODULE_ENABLED: bool
     name: str
