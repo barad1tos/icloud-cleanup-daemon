@@ -5,7 +5,8 @@ from __future__ import annotations
 import asyncio
 import logging
 import signal
-from dataclasses import dataclass
+from collections import defaultdict
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -16,10 +17,12 @@ from rich.logging import RichHandler
 from .cleaner import Cleaner, CleanupResult
 from .detector import ConflictDetector, ConflictFile
 from .icloud_status import ICloudStatusChecker
+from .modules import discover_modules
 from .watcher import FileWatcher
 
 if TYPE_CHECKING:
     from .config import CleanupConfig
+    from .modules.base import CleanupModule, DetectedFile
 
 
 @dataclass
@@ -27,11 +30,45 @@ class DaemonStats:
     """Statistics for the daemon."""
 
     start_time: datetime
-    conflicts_detected: int = 0
-    conflicts_deleted: int = 0
-    conflicts_recovered: int = 0
-    conflicts_skipped: int = 0
+    files_detected: int = 0
+    files_deleted: int = 0
+    files_recovered: int = 0
+    files_skipped: int = 0
     errors: int = 0
+    per_module: defaultdict[str, int] = field(default_factory=lambda: defaultdict(int))
+
+    # Backward-compat aliases
+    @property
+    def conflicts_detected(self) -> int:
+        return self.files_detected
+
+    @conflicts_detected.setter
+    def conflicts_detected(self, value: int) -> None:
+        self.files_detected = value
+
+    @property
+    def conflicts_deleted(self) -> int:
+        return self.files_deleted
+
+    @conflicts_deleted.setter
+    def conflicts_deleted(self, value: int) -> None:
+        self.files_deleted = value
+
+    @property
+    def conflicts_recovered(self) -> int:
+        return self.files_recovered
+
+    @conflicts_recovered.setter
+    def conflicts_recovered(self, value: int) -> None:
+        self.files_recovered = value
+
+    @property
+    def conflicts_skipped(self) -> int:
+        return self.files_skipped
+
+    @conflicts_skipped.setter
+    def conflicts_skipped(self, value: int) -> None:
+        self.files_skipped = value
 
 
 class ICloudCleanupDaemon:
@@ -54,10 +91,18 @@ class ICloudCleanupDaemon:
         self.cleaner = Cleaner(config, self.logger)
         self.watcher = FileWatcher(config, self.detector, self.logger)
 
+        # Discover cleanup modules
+        self.modules: list[CleanupModule] = discover_modules(config)
+        self.logger.info(
+            "Loaded %d cleanup modules: %s",
+            len(self.modules),
+            ", ".join(m.name for m in self.modules),
+        )
+
         # State
         self.stats = DaemonStats(start_time=datetime.now())
         self._running = False
-        self._pending_deletes: dict[Path, float] = {}  # path -> timestamp when detected
+        self._pending_deletes: dict[Path, tuple[float, DetectedFile | None]] = {}
         self._failed_deletes: dict[Path, tuple[int, float]] = {}  # (count, timestamp)
 
     def _setup_logging(self) -> logging.Logger:
@@ -70,7 +115,7 @@ class ICloudCleanupDaemon:
         logger = logging.getLogger("icloud-cleanup")
         logger.setLevel(getattr(logging, self.config.log_level))
 
-        # Clear existing handlers to avoid duplicates if daemon is recreated
+        # Clear existing handlers to avoid duplicates if the daemon is recreated
         if logger.handlers:
             logger.handlers.clear()
 
@@ -87,15 +132,52 @@ class ICloudCleanupDaemon:
         self.config.log_file.parent.mkdir(parents=True, exist_ok=True)
         file_handler = logging.FileHandler(self.config.log_file)
         file_handler.setLevel(logging.DEBUG)
-        file_handler.setFormatter(
-            logging.Formatter("%(asctime)s | %(levelname)s | %(message)s")
-        )
+        file_handler.setFormatter(logging.Formatter("%(asctime)s | %(levelname)s | %(message)s"))
         logger.addHandler(file_handler)
 
         return logger
 
+    async def _process_detected(self, detected: DetectedFile) -> CleanupResult | None:
+        """Process a detected file from any module.
+
+        Args:
+            detected: Detected file to process.
+
+        Returns:
+            Cleanup result, or None if skipped.
+
+        """
+        path = detected.path
+        current_time = asyncio.get_running_loop().time()
+
+        should_skip, failure_count = self._check_cooldown_status(path, current_time)
+        if should_skip:
+            self.stats.files_skipped += 1
+            return None
+
+        if not path.exists():
+            self.stats.files_skipped += 1
+            return None
+
+        # Wait for iCloud sync for files that need recovery (iCloud files)
+        if detected.recovery_enabled:
+            self.logger.debug("Waiting for iCloud sync: %s", path.name)
+            if not await self.checker.wait_for_sync(path):
+                self.logger.warning("Timeout waiting for sync: %s", path.name)
+                self.stats.files_skipped += 1
+                return None
+
+        result = self.cleaner.delete_detected(detected)
+        self._update_stats_after_delete(path, result, failure_count, current_time)
+
+        # Track per-module stats
+        if result.success:
+            self.stats.per_module[detected.module_name] += 1
+
+        return result
+
     async def _process_conflict(self, conflict: ConflictFile) -> CleanupResult | None:
-        """Process a single conflict file.
+        """Process a single conflict file (backward-compat wrapper).
 
         Args:
             conflict: Conflict file to process.
@@ -159,7 +241,6 @@ class ICloudCleanupDaemon:
             return False, failure_count
 
         if time_since_failure < self.config.retry_cooldown:
-            # Still in cooldown - skip silently
             return True, failure_count
 
         # Cooldown expired - reset counter and try again
@@ -174,20 +255,20 @@ class ICloudCleanupDaemon:
     def _update_stats_after_delete(
         self, path: Path, result: CleanupResult, failure_count: int, current_time: float
     ) -> None:
-        """Update stats and failure tracking after deletion attempt.
+        """Update stats and failure tracking after a deletion attempt.
 
         Args:
             path: Path that was processed.
             result: Result of the deletion attempt.
-            failure_count: Current failure count before this attempt.
+            failure_count: Number of prior failures for this path.
             current_time: Current loop time.
 
         """
         if result.success:
             if result.action == "deleted":
-                self.stats.conflicts_deleted += 1
+                self.stats.files_deleted += 1
             elif result.action == "recovered":
-                self.stats.conflicts_recovered += 1
+                self.stats.files_recovered += 1
             self._failed_deletes.pop(path, None)
             return
 
@@ -215,31 +296,37 @@ class ICloudCleanupDaemon:
         """Process files that have been pending long enough."""
         current_time = asyncio.get_running_loop().time()
 
-        paths_to_process = [
-            path
-            for path, timestamp in self._pending_deletes.items()
-            if current_time - timestamp >= self.config.wait_before_delete
-        ]
-        for path in paths_to_process:
+        ready: list[tuple[Path, DetectedFile | None]] = []
+        for path, (timestamp, detected) in self._pending_deletes.items():
+            wait_time = 0 if (detected and not detected.recovery_enabled) else self.config.wait_before_delete
+            if current_time - timestamp >= wait_time:
+                ready.append((path, detected))
+
+        for path, _ in ready:
             del self._pending_deletes[path]
 
-        for path in paths_to_process:
-            if conflict := self.detector.is_conflict_file(path):
+        for path, detected in ready:
+            if detected is not None:
+                await self._process_detected(detected)
+            elif conflict := self.detector.is_conflict_file(path):
                 await self._process_conflict(conflict)
 
     def _scan_and_queue(self) -> None:
-        """Scan all directories and queue conflicts for deletion."""
-        conflicts = self.detector.scan_all()
+        """Scan all directories using all modules and queue files for deletion."""
         current_time = asyncio.get_running_loop().time()
 
-        for conflict in conflicts:
-            # Only queue if the original file exists (otherwise it's not a real conflict)
-            if not conflict.original_path.exists():
-                continue
-            if conflict.path not in self._pending_deletes:
-                self._pending_deletes[conflict.path] = current_time
-                self.stats.conflicts_detected += 1
-                self.logger.info("Queued for deletion: %s", conflict.path.name)
+        # Scan via all modules
+        for module in self.modules:
+            for detected in module.scan_all():
+                if detected.path not in self._pending_deletes:
+                    self._pending_deletes[detected.path] = (current_time, detected)
+                    self.stats.files_detected += 1
+                    self.logger.info(
+                        "Queued [%s]: %s — %s",
+                        detected.module_name,
+                        detected.path.name,
+                        detected.reason,
+                    )
 
     async def run_once(self) -> list[CleanupResult]:
         """Run a single cleanup pass.
@@ -251,28 +338,26 @@ class ICloudCleanupDaemon:
         self.logger.info("Starting single cleanup pass...")
         results: list[CleanupResult] = []
 
-        all_conflicts = self.detector.scan_all()
-        # Filter to only real conflicts (where the original exists)
-        conflicts = [c for c in all_conflicts if c.original_path.exists()]
-        if false_positives := len(all_conflicts) - len(conflicts):
-            self.logger.debug(
-                "Filtered out %d files where original doesn't exist",
-                false_positives,
-            )
-        self.logger.info("Found %d conflict files", len(conflicts))
+        # Scan via all modules
+        all_detected: list[DetectedFile] = []
+        for module in self.modules:
+            all_detected.extend(module.scan_all())
 
-        for conflict in conflicts:
-            self.stats.conflicts_detected += 1
+        self.logger.info("Found %d files to process across %d modules", len(all_detected), len(self.modules))
 
-            # Wait a specified time
-            self.logger.info(
-                "Waiting %ds before processing: %s",
-                self.config.wait_before_delete,
-                conflict.path.name,
-            )
-            await asyncio.sleep(self.config.wait_before_delete)
+        for detected in all_detected:
+            self.stats.files_detected += 1
 
-            if result := await self._process_conflict(conflict):
+            # Only delay for files that want recovery (iCloud conflicts)
+            if detected.recovery_enabled:
+                self.logger.info(
+                    "Waiting %ds before processing: %s",
+                    self.config.wait_before_delete,
+                    detected.path.name,
+                )
+                await asyncio.sleep(self.config.wait_before_delete)
+
+            if result := await self._process_detected(detected):
                 results.append(result)
 
         if cleaned := self.cleaner.cleanup_recovery_dir():
@@ -309,8 +394,9 @@ class ICloudCleanupDaemon:
                     except TimeoutError:
                         break
                     if path not in self._pending_deletes:
-                        self._pending_deletes[path] = asyncio.get_running_loop().time()
-                        self.stats.conflicts_detected += 1
+                        # Watcher currently only handles conflict files
+                        self._pending_deletes[path] = (asyncio.get_running_loop().time(), None)
+                        self.stats.files_detected += 1
                         self.logger.info("Detected new conflict: %s", path.name)
 
                 # Periodic full scan
@@ -327,9 +413,9 @@ class ICloudCleanupDaemon:
             self.watcher.stop()
             self.logger.info(
                 "Daemon stopped. Stats: detected=%d, deleted=%d, recovered=%d, errors=%d",
-                self.stats.conflicts_detected,
-                self.stats.conflicts_deleted,
-                self.stats.conflicts_recovered,
+                self.stats.files_detected,
+                self.stats.files_deleted,
+                self.stats.files_recovered,
                 self.stats.errors,
             )
 

@@ -17,6 +17,7 @@ from .daemon import ICloudCleanupDaemon
 
 if TYPE_CHECKING:
     from .cleaner import Cleaner
+    from .modules.base import DetectedFile
 
 
 def parse_args() -> argparse.Namespace:
@@ -134,41 +135,37 @@ def cmd_scan(config: CleanupConfig, args: argparse.Namespace) -> int:  # NOSONAR
         Exit code.
 
     """
-    from .detector import ConflictDetector
+    from .modules import discover_modules
 
     console = Console()
-    detector = ConflictDetector(config)
+    modules = discover_modules(config)
 
-    conflicts = detector.scan_directory(args.dir) if args.dir else detector.scan_all()
+    all_detected: list[DetectedFile] = []
+    for module in modules:
+        if args.dir:
+            all_detected.extend(module.scan_directory(args.dir))
+        else:
+            all_detected.extend(module.scan_all())
 
-    if not conflicts:
-        console.print("[green]No conflict files found[/green]")
+    if not all_detected:
+        console.print("[green]No files to clean up[/green]")
         return 0
 
-    # Filter to only real conflicts (where the original exists)
-    real_conflicts = [c for c in conflicts if c.original_path.exists()]
-    false_positives = len(conflicts) - len(real_conflicts)
-
-    table = Table(title=f"Found {len(real_conflicts)} conflict files")
-    table.add_column("Conflict File", style="red")
-    table.add_column("Original", style="green")
+    table = Table(title=f"Found {len(all_detected)} files to clean up")
+    table.add_column("Module", style="cyan")
+    table.add_column("File", style="red")
+    table.add_column("Reason", style="green")
     table.add_column("Location", style="dim")
 
-    for conflict in real_conflicts:
+    for detected in all_detected:
         table.add_row(
-            conflict.path.name,
-            conflict.original_path.name,
-            str(conflict.path.parent),
+            detected.module_name,
+            detected.path.name,
+            detected.reason,
+            str(detected.path.parent),
         )
 
     console.print(table)
-
-    if false_positives > 0:
-        console.print(
-            f"\n[dim]Filtered out {false_positives} files where original doesn't exist "
-            "(likely not iCloud conflicts)[/dim]"
-        )
-
     return 0
 
 
@@ -278,7 +275,7 @@ def _list_recovery_files(cleaner: Cleaner, console: Console) -> int:  # NOSONAR
 
 
 def cmd_run(config: CleanupConfig, args: argparse.Namespace) -> int:  # NOSONAR
-    """Execute run command.
+    """Execute the run command.
 
     Args:
         config: Cleanup configuration.
@@ -306,36 +303,37 @@ def cmd_run(config: CleanupConfig, args: argparse.Namespace) -> int:  # NOSONAR
 
 def _dry_run(config: CleanupConfig) -> int:
     """Show what would be deleted without actually deleting."""
-    from .detector import ConflictDetector
+    from .modules import discover_modules
 
     console = Console()
-    detector = ConflictDetector(config)
+    modules = discover_modules(config)
 
-    console.print("\n[bold yellow]🔍 DRY RUN MODE - No files will be deleted[/bold yellow]\n")
+    console.print("\n[bold yellow]DRY RUN MODE - No files will be deleted[/bold yellow]\n")
     console.print(f"[dim]Watch directories: {', '.join(str(d) for d in config.watch_directories)}[/dim]")
     console.print(f"[dim]Recovery enabled: {config.enable_recovery}[/dim]")
-    console.print(f"[dim]Wait before delete: {config.wait_before_delete}s[/dim]\n")
+    console.print(f"[dim]Loaded modules: {', '.join(m.name for m in modules)}[/dim]\n")
 
-    conflicts = detector.scan_all()
+    all_detected: list[DetectedFile] = []
+    for module in modules:
+        all_detected.extend(module.scan_all())
 
-    if not conflicts:
-        console.print("[green]✅ No conflict files found[/green]")
+    if not all_detected:
+        console.print("[green]No files to clean up[/green]")
         return 0
 
-    table = Table(title=f"Would process {len(conflicts)} conflict files")
+    table = Table(title=f"Would process {len(all_detected)} files")
     table.add_column("Action", style="yellow")
-    table.add_column("Conflict File", style="red")
-    table.add_column("Original File", style="green")
-    table.add_column("Original Exists", style="cyan")
+    table.add_column("Module", style="cyan")
+    table.add_column("File", style="red")
+    table.add_column("Reason", style="green")
 
-    for conflict in conflicts:
-        action = "MOVE to recovery" if config.enable_recovery else "DELETE"
-        original_exists = "✅ Yes" if conflict.original_path.exists() else "❌ No (SKIP)"
+    for detected in all_detected:
+        action = "MOVE to recovery" if detected.recovery_enabled and config.enable_recovery else "DELETE"
         table.add_row(
             action,
-            conflict.path.name,
-            conflict.original_path.name,
-            original_exists,
+            detected.module_name,
+            detected.path.name,
+            detected.reason,
         )
 
     console.print(table)
@@ -384,9 +382,7 @@ def cmd_nosync(config: CleanupConfig, args: argparse.Namespace) -> int:
     return 0
 
 
-def _print_nosync_candidates(
-    candidates: list[Path], console: Console, args: argparse.Namespace
-) -> int:
+def _print_nosync_candidates(candidates: list[Path], console: Console, args: argparse.Namespace) -> int:
     """Print table of nosync candidates."""
     table = Table(title=f"Found {len(candidates)} directories to exclude")
     table.add_column("Directory", style="yellow")

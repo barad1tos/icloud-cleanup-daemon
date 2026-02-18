@@ -1,6 +1,5 @@
 """Cleanup logic for iCloud conflict files with recovery support."""
 
-
 from __future__ import annotations
 
 import contextlib
@@ -14,6 +13,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from .config import CleanupConfig
     from .detector import ConflictFile
+    from .modules.base import DetectedFile
 
 
 @dataclass
@@ -31,17 +31,19 @@ class Cleaner:
     """Cleans up iCloud conflict files with optional recovery."""
 
     # Directories that should never be cleaned
-    PROTECTED_PATHS: frozenset[str] = frozenset({
-        "/",
-        "/System",
-        "/Applications",
-        "/Library",
-        "/usr",
-        "/bin",
-        "/sbin",
-        "/var",
-        "/private",
-    })
+    PROTECTED_PATHS: frozenset[str] = frozenset(
+        {
+            "/",
+            "/System",
+            "/Applications",
+            "/Library",
+            "/usr",
+            "/bin",
+            "/sbin",
+            "/var",
+            "/private",
+        }
+    )
 
     def __init__(self, config: CleanupConfig, logger: logging.Logger) -> None:
         """Initialize the cleaner.
@@ -73,8 +75,7 @@ class Cleaner:
             (
                 not resolved_str.startswith(home_str)
                 for protected in self.PROTECTED_PATHS
-                if resolved_str.startswith(f"{protected}/")
-                or resolved_str == protected
+                if resolved_str.startswith(f"{protected}/") or resolved_str == protected
             ),
             False,
         )
@@ -84,38 +85,49 @@ class Cleaner:
         if self.config.enable_recovery:
             self.config.recovery_dir.mkdir(parents=True, exist_ok=True)
 
-    def _get_recovery_path(self, conflict: ConflictFile) -> Path:
-        """Generate a unique recovery path for a conflict file.
+    def _get_recovery_path(self, file_path: Path) -> Path:
+        """Generate a unique recovery path for a file.
 
         Args:
-            conflict: Conflict file to recover.
+            file_path: Path to the file being recovered.
 
         Returns:
             Path where the file will be stored for recovery.
 
         """
-        # Create date-based subdirectory
         date_dir = datetime.now(UTC).strftime("%Y-%m-%d")
         recovery_subdir = self.config.recovery_dir / date_dir
         recovery_subdir.mkdir(parents=True, exist_ok=True)
 
-        # Include parent directory info to avoid collisions
-        parent_hash = hex(hash(str(conflict.path.parent)))[-6:]
-        base_filename = f"{parent_hash}_{conflict.path.name}"
+        parent_hash = hex(hash(str(file_path.parent)))[-6:]
+        base_filename = f"{parent_hash}_{file_path.name}"
         recovery_path = recovery_subdir / base_filename
 
-        # Handle collision if file already exists (same file processed twice)
         counter = 1
         while recovery_path.exists():
-            stem = conflict.path.stem
-            suffix = conflict.path.suffix
-            recovery_path = recovery_subdir / f"{parent_hash}_{stem}_{counter}{suffix}"
+            recovery_path = recovery_subdir / f"{parent_hash}_{file_path.stem}_{counter}{file_path.suffix}"
             counter += 1
 
         return recovery_path
 
+    def delete_detected(self, detected: DetectedFile) -> CleanupResult:
+        """Delete a detected file, respecting its recovery_enabled flag.
+
+        Args:
+            detected: Detected file to delete.
+
+        Returns:
+            CleanupResult with operation details.
+
+        """
+        path = detected.path
+        use_recovery = detected.recovery_enabled and self.config.enable_recovery
+        return self._delete_path(path, use_recovery=use_recovery)
+
     def delete_conflict(self, conflict: ConflictFile, *, force: bool = False) -> CleanupResult:
         """Delete a conflict file, optionally moving to recovery.
+
+        Backward-compatible wrapper around _delete_path.
 
         Args:
             conflict: Conflict file to delete.
@@ -125,8 +137,20 @@ class Cleaner:
             CleanupResult with operation details.
 
         """
-        path = conflict.path
+        use_recovery = self.config.enable_recovery and not force
+        return self._delete_path(conflict.path, use_recovery=use_recovery)
 
+    def _delete_path(self, path: Path, *, use_recovery: bool) -> CleanupResult:
+        """Core deletion logic for a file path.
+
+        Args:
+            path: Path to delete.
+            use_recovery: Whether to move to recovery instead of deleting.
+
+        Returns:
+            CleanupResult with operation details.
+
+        """
         if not path.exists():
             return CleanupResult(
                 path=path,
@@ -145,34 +169,24 @@ class Cleaner:
             )
 
         try:
-            if self.config.enable_recovery and not force:
-                # Move to recovery directory
-                recovery_path = self._get_recovery_path(conflict)
+            if use_recovery:
+                recovery_path = self._get_recovery_path(path)
                 shutil.move(str(path), str(recovery_path))
-
-                self.logger.info(
-                    "Moved conflict to recovery: %s -> %s",
-                    path.name,
-                    recovery_path,
-                )
-
+                self.logger.info("Moved to recovery: %s -> %s", path.name, recovery_path)
                 return CleanupResult(
                     path=path,
                     success=True,
                     action="recovered",
                     recovery_path=recovery_path,
                 )
-            else:
-                # Delete immediately
-                path.unlink()
 
-                self.logger.info("Deleted conflict file: %s", path)
-
-                return CleanupResult(
-                    path=path,
-                    success=True,
-                    action="deleted",
-                )
+            path.unlink()
+            self.logger.info("Deleted file: %s", path)
+            return CleanupResult(
+                path=path,
+                success=True,
+                action="deleted",
+            )
 
         except PermissionError as e:
             self.logger.error("Permission denied deleting %s: %s", path, e)
@@ -192,7 +206,7 @@ class Cleaner:
             )
 
     def cleanup_recovery_dir(self) -> int:
-        """Remove files older than retention period from recovery directory.
+        """Remove files older than the retention period from the recovery directory.
 
         Returns:
             Number of files cleaned up.
@@ -233,8 +247,8 @@ class Cleaner:
         """Restore a file from recovery.
 
         Args:
-            recovery_path: Path to file in recovery directory.
-            destination: Where to restore. If None, attempts to restore to original location.
+            recovery_path: Path to a file in the recovery directory.
+            destination: Where to restore. If None, attempts to restore to the original location.
 
         Returns:
             True if restoration is successful.
@@ -245,7 +259,7 @@ class Cleaner:
             return False
 
         if destination is None:
-            # Extract original filename (remove hash prefix)
+            # Extract the original filename (remove hash prefix)
             parts = recovery_path.name.split("_", 1)
             original_name = parts[1] if len(parts) > 1 else recovery_path.name
 
@@ -283,9 +297,5 @@ class Cleaner:
                 except ValueError:
                     continue
 
-                files.extend(
-                    (file_path, dir_date)
-                    for file_path in date_dir.iterdir()
-                    if file_path.is_file()
-                )
+                files.extend((file_path, dir_date) for file_path in date_dir.iterdir() if file_path.is_file())
         return sorted(files, key=lambda x: x[1], reverse=True)

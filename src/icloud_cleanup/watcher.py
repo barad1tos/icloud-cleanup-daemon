@@ -16,6 +16,7 @@ if TYPE_CHECKING:
 
     from .config import CleanupConfig
     from .detector import ConflictDetector
+    from .modules.base import CleanupModule
 
 
 class ConflictEventHandler(FileSystemEventHandler):
@@ -26,6 +27,7 @@ class ConflictEventHandler(FileSystemEventHandler):
         detector: ConflictDetector,
         callback: Callable[[Path], None],
         logger: logging.Logger,
+        modules: list[CleanupModule] | None = None,
     ) -> None:
         """Initialize the event handler.
 
@@ -33,12 +35,14 @@ class ConflictEventHandler(FileSystemEventHandler):
             detector: Conflict detector instance.
             callback: Function to call when conflict is detected.
             logger: Logger instance.
+            modules: Optional list of cleanup modules with supports_watch=True.
 
         """
         super().__init__()
         self.detector = detector
         self.callback = callback
         self.logger = logger
+        self._watch_modules = [m for m in (modules or []) if m.supports_watch]
 
     def on_created(self, event: FileSystemEvent) -> None:
         """Handle file creation events.
@@ -63,15 +67,27 @@ class ConflictEventHandler(FileSystemEventHandler):
             self._check_path(Path(dest_path))
 
     def _check_path(self, path: Path) -> None:
-        """Check if the path is a conflict file.
+        """Check if the path matches any watch-capable module.
+
+        First checks the legacy detector, then iterates modules with
+        supports_watch=True. First match wins.
 
         Args:
             path: Path to check.
 
         """
+        # Legacy detector check
         if conflict := self.detector.is_conflict_file(path):
             self.logger.debug("Detected conflict file: %s", conflict.path.name)
             self.callback(path)
+            return
+
+        # Check additional modules
+        for module in self._watch_modules:
+            if detected := module.is_target(path):
+                self.logger.debug("Detected [%s]: %s", detected.module_name, path.name)
+                self.callback(path)
+                return
 
 
 class FileWatcher:
@@ -82,6 +98,7 @@ class FileWatcher:
         config: CleanupConfig,
         detector: ConflictDetector,
         logger: logging.Logger,
+        modules: list[CleanupModule] | None = None,
     ) -> None:
         """Initialize the file watcher.
 
@@ -89,11 +106,13 @@ class FileWatcher:
             config: Cleanup configuration.
             detector: Conflict detector instance.
             logger: Logger instance.
+            modules: Optional list of cleanup modules for a multi-module watch.
 
         """
         self.config = config
         self.detector = detector
         self.logger = logger
+        self._modules = modules or []
         self._observer: Any = None
         self._pending_conflicts: asyncio.Queue[Path] = asyncio.Queue()
         self._running = False
@@ -102,7 +121,7 @@ class FileWatcher:
         """Handle detected conflict file.
 
         Args:
-            path: Path to conflict file.
+            path: Path to a conflict file.
 
         """
         try:
@@ -120,6 +139,7 @@ class FileWatcher:
             self.detector,
             self._on_conflict_detected,
             self.logger,
+            modules=self._modules,
         )
 
         for directory in self.config.watch_directories:
@@ -151,7 +171,7 @@ class FileWatcher:
         """Get a pending conflict file from the queue.
 
         Returns:
-            Path to conflict file.
+            Path to a conflict file.
 
         """
         return await self._pending_conflicts.get()
