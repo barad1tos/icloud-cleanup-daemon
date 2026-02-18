@@ -165,11 +165,12 @@ make config
 ```
 1. Discovery   →  Auto-discover enabled cleanup modules
 2. Detection   →  Each module scans for its file patterns
-3. Verification →  Module-specific checks (e.g., original exists)
-4. Safety Check →  Ensure file is not in protected directory
-5. Sync Check  →  Wait for iCloud sync (if recovery enabled)
-6. Cleanup     →  Delete or move to recovery directory
-7. Retention   →  Auto-delete recovered files after 7 days
+3. Watching    →  FSEvents monitor triggers modules in real-time
+4. Verification →  Module-specific checks (e.g., original exists)
+5. Safety Check →  Ensure file is not in protected directory
+6. Sync Check  →  Wait for iCloud sync (if recovery enabled)
+7. Cleanup     →  Delete or move to recovery directory
+8. Retention   →  Auto-delete recovered files after 7 days
 ```
 
 ### Cleanup Modules

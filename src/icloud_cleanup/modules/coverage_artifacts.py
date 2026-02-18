@@ -17,6 +17,7 @@ if TYPE_CHECKING:
     from ..config import CleanupConfig
 
 _PATTERN = re.compile(r"^\.coverage\..+\.pid\d+\..+$")
+_SKIP_DIRS = frozenset({".git", ".venv", "venv", "node_modules", ".tox", "__pycache__"})
 
 
 class CoverageArtifactsModule:
@@ -77,6 +78,8 @@ class CoverageArtifactsModule:
 
         with contextlib.suppress(PermissionError):
             for path in directory.rglob(".*"):
+                if any(part in _SKIP_DIRS for part in path.parts):
+                    continue
                 if result := self.is_target(path):
                     detected.append(result)
 

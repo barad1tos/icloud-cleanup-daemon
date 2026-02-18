@@ -85,19 +85,19 @@ class ICloudCleanupDaemon:
         self.logger = self._setup_logging()
         self.console = Console()
 
-        # Initialize components
-        self.detector = ConflictDetector(config)
-        self.checker = ICloudStatusChecker(config)
-        self.cleaner = Cleaner(config, self.logger)
-        self.watcher = FileWatcher(config, self.detector, self.logger)
-
-        # Discover cleanup modules
+        # Discover cleanup modules first (watcher needs them)
         self.modules: list[CleanupModule] = discover_modules(config)
         self.logger.info(
             "Loaded %d cleanup modules: %s",
             len(self.modules),
             ", ".join(m.name for m in self.modules),
         )
+
+        # Initialize components
+        self.detector = ConflictDetector(config)
+        self.checker = ICloudStatusChecker(config)
+        self.cleaner = Cleaner(config, self.logger)
+        self.watcher = FileWatcher(config, self.detector, self.logger, modules=self.modules)
 
         # State
         self.stats = DaemonStats(start_time=datetime.now())
@@ -386,18 +386,18 @@ class ICloudCleanupDaemon:
                 # Process any pending deletes
                 await self._process_pending_deletes()
 
-                # Check for new conflicts from watcher
+                # Check for new files from watcher
                 while True:
                     try:
                         async with asyncio.timeout(0.1):
-                            path = await self.watcher.get_pending_conflict()
+                            path, detected = await self.watcher.get_pending()
                     except TimeoutError:
                         break
                     if path not in self._pending_deletes:
-                        # Watcher currently only handles conflict files
-                        self._pending_deletes[path] = (asyncio.get_running_loop().time(), None)
+                        self._pending_deletes[path] = (asyncio.get_running_loop().time(), detected)
                         self.stats.files_detected += 1
-                        self.logger.info("Detected new conflict: %s", path.name)
+                        label = f"[{detected.module_name}]" if detected else "conflict"
+                        self.logger.info("Detected %s: %s", label, path.name)
 
                 # Periodic full scan
                 await asyncio.sleep(self.config.scan_interval)

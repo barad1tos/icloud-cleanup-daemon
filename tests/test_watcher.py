@@ -12,6 +12,7 @@ from watchdog.events import FileCreatedEvent, FileMovedEvent
 
 from icloud_cleanup.config import CleanupConfig
 from icloud_cleanup.detector import ConflictDetector
+from icloud_cleanup.modules.base import DetectedFile
 from icloud_cleanup.watcher import ConflictEventHandler, FileWatcher
 
 
@@ -36,9 +37,7 @@ def logger() -> logging.Logger:
 
 
 @pytest.fixture
-def watcher(
-    config: CleanupConfig, detector: ConflictDetector, logger: logging.Logger
-) -> FileWatcher:
+def watcher(config: CleanupConfig, detector: ConflictDetector, logger: logging.Logger) -> FileWatcher:
     """Create file watcher."""
     return FileWatcher(config, detector, logger)
 
@@ -46,18 +45,19 @@ def watcher(
 class TestConflictEventHandler:
     """Tests for ConflictEventHandler."""
 
-    def test_on_created_conflict_file(
-        self, detector: ConflictDetector, logger: logging.Logger, tmp_path: Path
-    ) -> None:
+    def test_on_created_conflict_file(self, detector: ConflictDetector, logger: logging.Logger, tmp_path: Path) -> None:
         """Test handling of created conflict file."""
         callback_paths: list[Path] = []
 
-        def callback(path: Path) -> None:
+        def callback(path: Path, _detected: DetectedFile | None) -> None:
             callback_paths.append(path)
 
         handler = ConflictEventHandler(detector, callback, logger)
 
-        # Create a conflict file
+        # Create original so detector recognises the conflict
+        original = tmp_path / "document.txt"
+        original.touch()
+
         conflict_file = tmp_path / "document 2.txt"
         conflict_file.touch()
 
@@ -67,13 +67,11 @@ class TestConflictEventHandler:
         assert len(callback_paths) == 1
         assert callback_paths[0] == conflict_file
 
-    def test_on_created_regular_file(
-        self, detector: ConflictDetector, logger: logging.Logger, tmp_path: Path
-    ) -> None:
+    def test_on_created_regular_file(self, detector: ConflictDetector, logger: logging.Logger, tmp_path: Path) -> None:
         """Test that regular files don't trigger callback."""
         callback_paths: list[Path] = []
 
-        def callback(path: Path) -> None:
+        def callback(path: Path, _detected: DetectedFile | None) -> None:
             callback_paths.append(path)
 
         handler = ConflictEventHandler(detector, callback, logger)
@@ -93,7 +91,7 @@ class TestConflictEventHandler:
         """Test that directory creation is ignored."""
         callback_paths: list[Path] = []
 
-        def callback(path: Path) -> None:
+        def callback(path: Path, _detected: DetectedFile | None) -> None:
             callback_paths.append(path)
 
         handler = ConflictEventHandler(detector, callback, logger)
@@ -108,21 +106,23 @@ class TestConflictEventHandler:
 
         assert not callback_paths
 
-    def test_on_moved_conflict_file(
-        self, detector: ConflictDetector, logger: logging.Logger, tmp_path: Path
-    ) -> None:
+    def test_on_moved_conflict_file(self, detector: ConflictDetector, logger: logging.Logger, tmp_path: Path) -> None:
         """Test handling of moved file becoming conflict."""
         callback_paths: list[Path] = []
 
-        def callback(path: Path) -> None:
+        def callback(path: Path, _detected: DetectedFile | None) -> None:
             callback_paths.append(path)
 
         handler = ConflictEventHandler(detector, callback, logger)
 
+        # Create original so detector recognises the conflict
+        original = tmp_path / "document.txt"
+        original.touch()
+
         # Simulate file move
         src = tmp_path / "temp.txt"
         dest = tmp_path / "document 2.txt"
-        dest.touch()  # Create the destination file
+        dest.touch()
 
         event = FileMovedEvent(str(src), str(dest))
         handler.on_moved(event)
@@ -136,7 +136,7 @@ class TestConflictEventHandler:
         """Test that directory moves are ignored."""
         callback_paths: list[Path] = []
 
-        def callback(path: Path) -> None:
+        def callback(path: Path, _detected: DetectedFile | None) -> None:
             callback_paths.append(path)
 
         handler = ConflictEventHandler(detector, callback, logger)
@@ -151,16 +151,18 @@ class TestConflictEventHandler:
 
         assert not callback_paths
 
-    def test_handles_bytes_path(
-        self, detector: ConflictDetector, logger: logging.Logger, tmp_path: Path
-    ) -> None:
+    def test_handles_bytes_path(self, detector: ConflictDetector, logger: logging.Logger, tmp_path: Path) -> None:
         """Test handling of bytes paths (some FSEvents return bytes)."""
         callback_paths: list[Path] = []
 
-        def callback(path: Path) -> None:
+        def callback(path: Path, _detected: DetectedFile | None) -> None:
             callback_paths.append(path)
 
         handler = ConflictEventHandler(detector, callback, logger)
+
+        # Create original so detector recognises the conflict
+        original = tmp_path / "document.txt"
+        original.touch()
 
         conflict_file = tmp_path / "document 2.txt"
         conflict_file.touch()
@@ -205,56 +207,53 @@ class TestFileWatcher:
         watcher.stop()  # Should be no-op
         assert not watcher.is_running
 
-    def test_on_conflict_detected_queues_path(self, watcher: FileWatcher, tmp_path: Path) -> None:
-        """Test that detected conflicts are queued."""
+    def test_on_file_detected_queues_path(self, watcher: FileWatcher, tmp_path: Path) -> None:
+        """Test that detected files are queued."""
         conflict_path = tmp_path / "document 2.txt"
         conflict_path.touch()
 
-        watcher._on_conflict_detected(conflict_path)
+        watcher._on_file_detected(conflict_path, None)
 
-        assert not watcher._pending_conflicts.empty()
+        assert not watcher._pending_queue.empty()
 
-    def test_queue_full_warning(
-        self, watcher: FileWatcher, logger: logging.Logger, tmp_path: Path
-    ) -> None:
+    def test_queue_full_warning(self, watcher: FileWatcher, logger: logging.Logger, tmp_path: Path) -> None:
         """Test warning when the queue is full."""
-        # Create a new watcher with limited queue
-        watcher._pending_conflicts = asyncio.Queue(maxsize=1)
+        watcher._pending_queue = asyncio.Queue(maxsize=1)
 
         path1 = tmp_path / "doc 2.txt"
         path2 = tmp_path / "doc 3.txt"
         path1.touch()
         path2.touch()
 
-        watcher._on_conflict_detected(path1)
+        watcher._on_file_detected(path1, None)
         # This should warn about full queue but not crash
-        watcher._on_conflict_detected(path2)
+        watcher._on_file_detected(path2, None)
 
-        assert watcher._pending_conflicts.qsize() == 1
+        assert watcher._pending_queue.qsize() == 1
 
     @pytest.mark.asyncio
-    async def test_get_pending_conflict(self, watcher: FileWatcher, tmp_path: Path) -> None:
-        """Test getting pending conflict from queue."""
+    async def test_get_pending(self, watcher: FileWatcher, tmp_path: Path) -> None:
+        """Test getting pending item from queue."""
         conflict_path = tmp_path / "document 2.txt"
         conflict_path.touch()
 
-        watcher._on_conflict_detected(conflict_path)
-        result = await watcher.get_pending_conflict()
+        watcher._on_file_detected(conflict_path, None)
+        path, detected = await watcher.get_pending()
 
-        assert result == conflict_path
+        assert path == conflict_path
+        assert detected is None
 
     def test_clear_pending(self, watcher: FileWatcher, tmp_path: Path) -> None:
-        """Test clearing pending conflicts."""
-        # Queue some conflicts
+        """Test clearing pending items."""
         for i in range(5):
-            path = tmp_path / f"doc {i+2}.txt"
+            path = tmp_path / f"doc {i + 2}.txt"
             path.touch()
-            watcher._on_conflict_detected(path)
+            watcher._on_file_detected(path, None)
 
         count = watcher.clear_pending()
 
         assert count == 5
-        assert watcher._pending_conflicts.empty()
+        assert watcher._pending_queue.empty()
 
     def test_clear_pending_empty_queue(self, watcher: FileWatcher) -> None:
         """Test clearing already empty queue."""
@@ -334,8 +333,8 @@ class TestWatcherIntegration:
             # Wait for event with timeout
             try:
                 async with asyncio.timeout(5):
-                    detected = await watcher.get_pending_conflict()
-                assert detected == conflict
+                    path, _detected = await watcher.get_pending()
+                assert path == conflict
             except TimeoutError:
                 # FSEvents may not fire in test environment
                 pytest.skip("FSEvents not detected - may be environment limitation")
