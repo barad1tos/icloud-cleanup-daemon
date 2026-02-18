@@ -347,7 +347,7 @@ class TestRestoreFile:
 
     def test_restore_to_default_location(self, cleaner: Cleaner, config: CleanupConfig) -> None:
         """Test restoring a file to the default location."""
-        # Create a file in recovery with hash prefix
+        # Create a file in recovery with a hash prefix
         date_dir = config.recovery_dir / datetime.now(UTC).strftime("%Y-%m-%d")
         date_dir.mkdir(parents=True)
         recovery_file = date_dir / "abc123_document.txt"
@@ -440,7 +440,7 @@ class TestDeleteDetected:
         """Test that recovery_enabled=False permanently deletes the file."""
         from icloud_cleanup.modules.base import DetectedFile
 
-        config.enable_recovery = True  # global recovery on, but file opts out
+        config.enable_recovery = True  # global recovery on, but a file opts out
         cleaner = Cleaner(config, logger)
 
         target = tmp_path / ".coverage.host.pid1.abc"
