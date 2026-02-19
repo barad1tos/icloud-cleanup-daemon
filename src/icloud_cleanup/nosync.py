@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
@@ -226,11 +227,18 @@ class NosyncManager:
 
         return all_candidates
 
+    def _get_valuable_patterns(self) -> frozenset[str]:
+        """Return built-in valuable patterns extended by user config."""
+        if self.config.nosync_valuable_patterns:
+            return VALUABLE_PATTERNS | frozenset(self.config.nosync_valuable_patterns)
+        return VALUABLE_PATTERNS
+
     def verify_and_repair(self, directory: Path) -> list[RepairResult]:
         """Check .nosync directories for broken symlinks and repair them.
 
         Only processes valuable patterns (e.g. .venv, node_modules) since
-        ephemeral caches don't need symlink preservation.
+        ephemeral caches don't need symlink preservation. User-configured
+        valuable patterns from ``nosync.valuable_patterns`` are also included.
 
         Args:
             directory: Parent directory to scan for .nosync children.
@@ -242,6 +250,7 @@ class NosyncManager:
             return []
 
         results: list[RepairResult] = []
+        valuable = self._get_valuable_patterns()
 
         try:
             children = sorted(directory.iterdir())
@@ -256,7 +265,7 @@ class NosyncManager:
                 continue
 
             original_name = child.name.removesuffix(NOSYNC_SUFFIX)
-            if not self.matches_patterns(original_name, VALUABLE_PATTERNS):
+            if not self.matches_patterns(original_name, valuable):
                 continue
 
             result = self._repair_symlink(directory, child, original_name)
@@ -264,6 +273,22 @@ class NosyncManager:
                 results.append(result)
 
         return results
+
+    def _remove_conflict_symlinks(self, parent: Path, original_name: str) -> None:
+        """Remove all iCloud conflict symlinks for a given name (e.g. '.venv 2', '.venv 3')."""
+        try:
+            children = parent.iterdir()
+        except PermissionError:
+            return
+
+        conflict_re = re.compile(rf"^{re.escape(original_name)}\s+([2-9]|\d{{2,}})$")
+        for child in children:
+            if child.is_symlink() and conflict_re.match(child.name):
+                try:
+                    child.unlink()
+                    self.logger.info("Removed conflict symlink: %s", child.name)
+                except OSError as error:
+                    self.logger.warning("Failed to remove conflict symlink %s: %s", child.name, error)
 
     def _repair_symlink(
         self,
@@ -273,8 +298,8 @@ class NosyncManager:
     ) -> RepairResult | None:
         """Ensure a correct symlink exists for a .nosync directory.
 
-        Handles iCloud conflict symlinks (e.g. `.venv 2`) by removing them
-        and recreating the proper symlink at the original name.
+        Handles iCloud conflict symlinks (e.g. '.venv 2', '.venv 3')
+        by removing them and recreating the proper symlink at the original name.
 
         Args:
             parent: Directory containing the .nosync dir and symlink.
@@ -284,22 +309,8 @@ class NosyncManager:
         Returns:
             RepairResult if an action was taken, None if the symlink is healthy.
         """
-        # Clean up iCloud conflict symlinks (e.g. ".venv 2" -> ".venv.nosync")
-        conflict_path = parent / f"{original_name} 2"
-        if conflict_path.is_symlink():
-            try:
-                conflict_path.unlink()
-                self.logger.info(
-                    "Removed conflict symlink: %s",
-                    conflict_path.name,
-                )
-            except OSError as error:
-                return RepairResult(
-                    nosync_path=nosync_path,
-                    original_name=original_name,
-                    action="error",
-                    detail=f"Failed to remove conflict symlink: {error}",
-                )
+        # Clean up all iCloud conflict symlinks (e.g. ".venv 2", ".venv 3", etc.)
+        self._remove_conflict_symlinks(parent, original_name)
 
         symlink_path = parent / original_name
 

@@ -36,7 +36,7 @@ src/icloud_cleanup/
 └── modules/
     ├── __init__.py          # Auto-discovery: discover_modules(config)
     ├── base.py              # CleanupModule Protocol, DetectedFile dataclass
-    ├── icloud_conflicts.py  # iCloud conflict files (filename 2.ext)
+    ├── icloud_conflicts.py  # iCloud conflict files (filename 2.ext, 3.ext, etc.)
     ├── coverage_artifacts.py # Stale .coverage.host.pidN.hash files
     └── ephemeral_caches.py  # Regenerable cache dirs (__pycache__, etc.)
 ```

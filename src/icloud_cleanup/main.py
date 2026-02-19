@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import logging
+import re
 import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -366,24 +367,44 @@ def _print_nosync_candidates(candidates: list[Path], console: Console, args: arg
     return 0
 
 
-def _nosync_repair(
-    config: CleanupConfig,
+def _walk_and_repair(
+    root: Path,
     manager: NosyncManager,
     console: Console,
-    args: argparse.Namespace,
 ) -> int:
-    """Verify and repair broken nosync symlinks."""
-    directories = [args.dir] if args.dir else config.watch_directories
-    total_repaired = 0
-    style_map = {
-        "repaired": "[green]✓[/green]",
-        "warning": "[yellow]![/yellow]",
-        "error": "[red]✗[/red]",
-    }
+    """Recursively repair nosync symlinks in a directory tree."""
+    from .nosync import NOSYNC_SUFFIX
 
-    for directory in directories:
-        for result in manager.verify_and_repair(directory):
-            prefix = style_map.get(result.action, "")
+    repaired = _repair_directory(root, manager, console)
+
+    try:
+        children = sorted(root.iterdir())
+    except PermissionError:
+        return repaired
+
+    for child in children:
+        if child.is_symlink() or not child.is_dir():
+            continue
+        if child.name.endswith(NOSYNC_SUFFIX):
+            continue
+        repaired += _walk_and_repair(child, manager, console)
+
+    return repaired
+
+
+_REPAIR_STYLE_MAP = {
+    "repaired": "[green]✓[/green]",
+    "warning": "[yellow]![/yellow]",
+    "error": "[red]✗[/red]",
+}
+
+
+def _repair_directory(root: Path, manager: NosyncManager, console: Console) -> int:
+    """Repair nosync symlinks in a single directory and print results."""
+    repaired = 0
+    try:
+        for result in manager.verify_and_repair(root):
+            prefix = _REPAIR_STYLE_MAP.get(result.action, "")
             label = (
                 f"Repaired: {result.original_name}"
                 if result.action == "repaired"
@@ -391,15 +412,38 @@ def _nosync_repair(
             )
             console.print(f"{prefix} {label}")
             if result.action == "repaired":
-                total_repaired += 1
+                repaired += 1
+    except PermissionError:
+        console.print(f"[yellow]Permission denied: {root}[/yellow]")
+    return repaired
+
+
+def _nosync_repair(
+    config: CleanupConfig,
+    manager: NosyncManager,
+    console: Console,
+    args: argparse.Namespace,
+) -> int:
+    """Verify and repair broken nosync symlinks recursively."""
+    directories = [args.dir] if args.dir else config.watch_directories
+    total_repaired = 0
+
+    for directory in directories:
+        if directory.exists():
+            total_repaired += _walk_and_repair(directory, manager, console)
 
     console.print(f"\n[bold]Repaired {total_repaired} symlinks[/bold]")
     return 0
 
 
+_CONFLICT_SUFFIX_RE = re.compile(r"\s+[2-9]\d*$")
+
+
 def _is_conflict_symlink(item: Path) -> bool:
-    """Check if a path is a broken iCloud ' 2' conflict symlink."""
-    return item.is_symlink() and " 2" in item.name
+    """Check if a path is an iCloud conflict symlink (e.g. '.venv 2', '.venv 3')."""
+    if not item.is_symlink():
+        return False
+    return _CONFLICT_SUFFIX_RE.search(item.name) is not None
 
 
 def _is_orphaned_ephemeral_nosync(item: Path) -> bool:

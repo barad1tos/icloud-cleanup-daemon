@@ -476,6 +476,21 @@ class TestVerifyAndRepair:
         link = tmp_path / ".venv"
         assert link.is_symlink()
 
+    def test_conflict_3_and_higher_symlinks_removed(self, manager: NosyncManager, tmp_path: Path) -> None:
+        """iCloud can create ' 3', ' 4', etc. under bad network conditions."""
+        nosync = tmp_path / ".venv.nosync"
+        nosync.mkdir()
+        for num in (2, 3, 4):
+            conflict = tmp_path / f".venv {num}"
+            conflict.symlink_to(nosync.name)
+        results = manager.verify_and_repair(tmp_path)
+        assert len(results) == 1
+        assert results[0].action == "repaired"
+        for num in (2, 3, 4):
+            assert not (tmp_path / f".venv {num}").exists()
+        link = tmp_path / ".venv"
+        assert link.is_symlink()
+
     def test_real_directory_at_original_name_warning(self, manager: NosyncManager, tmp_path: Path) -> None:
         nosync = tmp_path / ".venv.nosync"
         nosync.mkdir()
