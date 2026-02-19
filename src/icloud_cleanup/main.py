@@ -446,7 +446,7 @@ def _is_conflict_symlink(item: Path) -> bool:
     return _CONFLICT_SUFFIX_RE.search(item.name) is not None
 
 
-def _is_orphaned_ephemeral_nosync(item: Path) -> bool:
+def _is_orphaned_ephemeral_nosync(item: Path, config: CleanupConfig) -> bool:
     """Check if a path is an orphaned .nosync dir for an ephemeral pattern."""
     from .nosync import EPHEMERAL_PATTERNS, NOSYNC_SUFFIX, NosyncManager
 
@@ -455,7 +455,10 @@ def _is_orphaned_ephemeral_nosync(item: Path) -> bool:
     if not item.name.endswith(NOSYNC_SUFFIX):
         return False
     base_name = item.name.removesuffix(NOSYNC_SUFFIX)
-    return NosyncManager.matches_patterns(base_name, EPHEMERAL_PATTERNS)
+    patterns = EPHEMERAL_PATTERNS
+    if config.nosync_ephemeral_patterns:
+        patterns = patterns | frozenset(config.nosync_ephemeral_patterns)
+    return NosyncManager.matches_patterns(base_name, patterns)
 
 
 def _nosync_cleanup(
@@ -474,14 +477,17 @@ def _nosync_cleanup(
             continue
         try:
             for item in directory.rglob("*"):
-                if _is_conflict_symlink(item):
-                    console.print(f"[red]Removing conflict symlink:[/red] {item}")
-                    item.unlink()
-                    removed += 1
-                elif _is_orphaned_ephemeral_nosync(item):
-                    console.print(f"[red]Removing ephemeral .nosync:[/red] {item}")
-                    shutil.rmtree(item)
-                    removed += 1
+                try:
+                    if _is_conflict_symlink(item):
+                        console.print(f"[red]Removing conflict symlink:[/red] {item}")
+                        item.unlink()
+                        removed += 1
+                    elif _is_orphaned_ephemeral_nosync(item, config):
+                        console.print(f"[red]Removing ephemeral .nosync:[/red] {item}")
+                        shutil.rmtree(item)
+                        removed += 1
+                except OSError as error:
+                    console.print(f"[yellow]Failed to remove {item.name}: {error}[/yellow]")
         except PermissionError:
             console.print(f"[yellow]Permission denied: {directory}[/yellow]")
 
