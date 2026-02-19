@@ -438,3 +438,67 @@ class TestPatternCategories:
         cache = tmp_path / "__pycache__"
         cache.mkdir()
         assert not NosyncManager.is_valuable_candidate(cache)
+
+
+class TestVerifyAndRepair:
+    """Tests for symlink guardian (verify_and_repair)."""
+
+    def test_healthy_symlink_no_action(self, manager: NosyncManager, tmp_path: Path) -> None:
+        nosync = tmp_path / ".venv.nosync"
+        nosync.mkdir()
+        link = tmp_path / ".venv"
+        link.symlink_to(nosync.name)
+        results = manager.verify_and_repair(tmp_path)
+        assert results == []
+
+    def test_missing_symlink_recreated(self, manager: NosyncManager, tmp_path: Path) -> None:
+        from icloud_cleanup.nosync import RepairResult
+
+        nosync = tmp_path / ".venv.nosync"
+        nosync.mkdir()
+        results = manager.verify_and_repair(tmp_path)
+        assert len(results) == 1
+        assert isinstance(results[0], RepairResult)
+        assert results[0].action == "repaired"
+        link = tmp_path / ".venv"
+        assert link.is_symlink()
+        assert link.resolve() == nosync.resolve()
+
+    def test_conflict_2_symlink_replaced(self, manager: NosyncManager, tmp_path: Path) -> None:
+        nosync = tmp_path / ".venv.nosync"
+        nosync.mkdir()
+        broken = tmp_path / ".venv 2"
+        broken.symlink_to(nosync.name)
+        results = manager.verify_and_repair(tmp_path)
+        assert len(results) == 1
+        assert results[0].action == "repaired"
+        assert not broken.exists()
+        link = tmp_path / ".venv"
+        assert link.is_symlink()
+
+    def test_real_directory_at_original_name_warning(self, manager: NosyncManager, tmp_path: Path) -> None:
+        nosync = tmp_path / ".venv.nosync"
+        nosync.mkdir()
+        real = tmp_path / ".venv"
+        real.mkdir()
+        results = manager.verify_and_repair(tmp_path)
+        assert len(results) == 1
+        assert results[0].action == "warning"
+        assert real.is_dir()
+        assert not real.is_symlink()
+
+    def test_only_processes_valuable_nosync_dirs(self, manager: NosyncManager, tmp_path: Path) -> None:
+        nosync = tmp_path / ".mypy_cache.nosync"
+        nosync.mkdir()
+        results = manager.verify_and_repair(tmp_path)
+        assert results == []
+
+    def test_repair_multiple_directories(self, manager: NosyncManager, tmp_path: Path) -> None:
+        for name in [".venv", "node_modules"]:
+            (tmp_path / f"{name}.nosync").mkdir()
+        results = manager.verify_and_repair(tmp_path)
+        assert len(results) == 2
+
+    def test_nonexistent_directory(self, manager: NosyncManager, tmp_path: Path) -> None:
+        results = manager.verify_and_repair(tmp_path / "missing")
+        assert results == []

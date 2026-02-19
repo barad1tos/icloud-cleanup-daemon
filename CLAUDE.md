@@ -47,6 +47,7 @@ src/icloud_cleanup/
 3. `FileWatcher` monitors directories in real-time; modules with `supports_watch=True` get checked on events
 4. `ICloudStatusChecker` waits for iCloud sync (only for files with `recovery_enabled=True`)
 5. `Cleaner.delete_detected()` handles deletion — recovery or direct unlink per `DetectedFile.recovery_enabled`
+6. `NosyncManager.verify_and_repair()` auto-repairs broken symlinks for valuable `.nosync` dirs (daemon runs this each scan cycle when `nosync.auto_repair` is enabled)
 
 ### Module System
 

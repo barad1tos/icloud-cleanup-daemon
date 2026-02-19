@@ -47,6 +47,16 @@ DEFAULT_EXCLUDE_PATTERNS: frozenset[str] = VALUABLE_PATTERNS | EPHEMERAL_PATTERN
 
 
 @dataclass
+class RepairResult:
+    """Result of a symlink repair operation."""
+
+    nosync_path: Path
+    original_name: str
+    action: Literal["repaired", "warning", "error"]
+    detail: str
+
+
+@dataclass
 class NosyncResult:
     """Result of a nosync operation."""
 
@@ -215,3 +225,144 @@ class NosyncManager:
             all_candidates.extend(candidates)
 
         return all_candidates
+
+    def verify_and_repair(self, directory: Path) -> list[RepairResult]:
+        """Check .nosync directories for broken symlinks and repair them.
+
+        Only processes valuable patterns (e.g. .venv, node_modules) since
+        ephemeral caches don't need symlink preservation.
+
+        Args:
+            directory: Parent directory to scan for .nosync children.
+
+        Returns:
+            List of repair actions taken. Empty if everything is healthy.
+        """
+        if not directory.exists():
+            return []
+
+        results: list[RepairResult] = []
+
+        try:
+            children = sorted(directory.iterdir())
+        except PermissionError:
+            self.logger.warning("Permission denied listing: %s", directory)
+            return []
+
+        for child in children:
+            if not child.is_dir() or child.is_symlink():
+                continue
+            if not child.name.endswith(NOSYNC_SUFFIX):
+                continue
+
+            original_name = child.name.removesuffix(NOSYNC_SUFFIX)
+            if not self.matches_patterns(original_name, VALUABLE_PATTERNS):
+                continue
+
+            result = self._repair_symlink(directory, child, original_name)
+            if result is not None:
+                results.append(result)
+
+        return results
+
+    def _repair_symlink(
+        self,
+        parent: Path,
+        nosync_path: Path,
+        original_name: str,
+    ) -> RepairResult | None:
+        """Ensure a correct symlink exists for a .nosync directory.
+
+        Handles iCloud conflict symlinks (e.g. `.venv 2`) by removing them
+        and recreating the proper symlink at the original name.
+
+        Args:
+            parent: Directory containing the .nosync dir and symlink.
+            nosync_path: The .nosync directory path.
+            original_name: Expected symlink name (without .nosync suffix).
+
+        Returns:
+            RepairResult if an action was taken, None if the symlink is healthy.
+        """
+        # Clean up iCloud conflict symlinks (e.g. ".venv 2" -> ".venv.nosync")
+        conflict_path = parent / f"{original_name} 2"
+        if conflict_path.is_symlink():
+            try:
+                conflict_path.unlink()
+                self.logger.info(
+                    "Removed conflict symlink: %s",
+                    conflict_path.name,
+                )
+            except OSError as error:
+                return RepairResult(
+                    nosync_path=nosync_path,
+                    original_name=original_name,
+                    action="error",
+                    detail=f"Failed to remove conflict symlink: {error}",
+                )
+
+        symlink_path = parent / original_name
+
+        # Healthy: valid symlink pointing to the correct target
+        if symlink_path.is_symlink():
+            target = symlink_path.readlink()
+            if target == Path(nosync_path.name):
+                return None
+
+            # Wrong target -- fix it
+            try:
+                symlink_path.unlink()
+                symlink_path.symlink_to(nosync_path.name)
+                self.logger.info(
+                    "Repaired symlink target: %s -> %s",
+                    original_name,
+                    nosync_path.name,
+                )
+                return RepairResult(
+                    nosync_path=nosync_path,
+                    original_name=original_name,
+                    action="repaired",
+                    detail=f"Fixed symlink target from {target} to {nosync_path.name}",
+                )
+            except OSError as error:
+                return RepairResult(
+                    nosync_path=nosync_path,
+                    original_name=original_name,
+                    action="error",
+                    detail=f"Failed to fix symlink target: {error}",
+                )
+
+        # Real directory at the original name -- don't touch it
+        if symlink_path.exists():
+            self.logger.warning(
+                "Real directory exists at symlink location: %s",
+                symlink_path,
+            )
+            return RepairResult(
+                nosync_path=nosync_path,
+                original_name=original_name,
+                action="warning",
+                detail=f"Real directory exists at {original_name}, cannot create symlink",
+            )
+
+        # No symlink exists -- create one
+        try:
+            symlink_path.symlink_to(nosync_path.name)
+            self.logger.info(
+                "Created missing symlink: %s -> %s",
+                original_name,
+                nosync_path.name,
+            )
+            return RepairResult(
+                nosync_path=nosync_path,
+                original_name=original_name,
+                action="repaired",
+                detail=f"Created symlink {original_name} -> {nosync_path.name}",
+            )
+        except OSError as error:
+            return RepairResult(
+                nosync_path=nosync_path,
+                original_name=original_name,
+                action="error",
+                detail=f"Failed to create symlink: {error}",
+            )

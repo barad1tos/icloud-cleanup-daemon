@@ -18,6 +18,7 @@ from .daemon import ICloudCleanupDaemon
 if TYPE_CHECKING:
     from .cleaner import Cleaner
     from .modules.base import DetectedFile
+    from .nosync import NosyncManager
 
 
 def parse_args() -> argparse.Namespace:
@@ -114,6 +115,16 @@ def parse_args() -> argparse.Namespace:
         type=Path,
         default=None,
         help="Specific directory to process",
+    )
+    nosync_parser.add_argument(
+        "--cleanup",
+        action="store_true",
+        help="Remove broken symlinks and orphaned ephemeral .nosync dirs",
+    )
+    nosync_parser.add_argument(
+        "--repair",
+        action="store_true",
+        help="Verify and repair broken nosync symlinks",
     )
 
     return parser.parse_args()
@@ -309,6 +320,12 @@ def cmd_nosync(config: CleanupConfig, args: argparse.Namespace) -> int:
     logger = logging.getLogger("icloud-cleanup")
     manager = NosyncManager(config, logger)
 
+    if getattr(args, "repair", False):
+        return _nosync_repair(config, manager, console, args)
+
+    if getattr(args, "cleanup", False):
+        return _nosync_cleanup(config, console, args)
+
     # Determine directories to scan
     candidates = manager.scan_for_candidates(args.dir) if args.dir else manager.scan_all()
 
@@ -346,6 +363,85 @@ def _print_nosync_candidates(candidates: list[Path], console: Console, args: arg
 
     if not args.apply:
         console.print("\n[bold]To convert, run with --apply flag[/bold]")
+    return 0
+
+
+def _nosync_repair(
+    config: CleanupConfig,
+    manager: NosyncManager,
+    console: Console,
+    args: argparse.Namespace,
+) -> int:
+    """Verify and repair broken nosync symlinks."""
+    directories = [args.dir] if args.dir else config.watch_directories
+    total_repaired = 0
+    style_map = {
+        "repaired": "[green]✓[/green]",
+        "warning": "[yellow]![/yellow]",
+        "error": "[red]✗[/red]",
+    }
+
+    for directory in directories:
+        for result in manager.verify_and_repair(directory):
+            prefix = style_map.get(result.action, "")
+            label = (
+                f"Repaired: {result.original_name}"
+                if result.action == "repaired"
+                else f"{result.original_name}: {result.detail}"
+            )
+            console.print(f"{prefix} {label}")
+            if result.action == "repaired":
+                total_repaired += 1
+
+    console.print(f"\n[bold]Repaired {total_repaired} symlinks[/bold]")
+    return 0
+
+
+def _is_conflict_symlink(item: Path) -> bool:
+    """Check if a path is a broken iCloud ' 2' conflict symlink."""
+    return item.is_symlink() and " 2" in item.name
+
+
+def _is_orphaned_ephemeral_nosync(item: Path) -> bool:
+    """Check if a path is an orphaned .nosync dir for an ephemeral pattern."""
+    from .nosync import EPHEMERAL_PATTERNS, NOSYNC_SUFFIX, NosyncManager
+
+    if not item.is_dir() or item.is_symlink():
+        return False
+    if not item.name.endswith(NOSYNC_SUFFIX):
+        return False
+    base_name = item.name.removesuffix(NOSYNC_SUFFIX)
+    return NosyncManager.matches_patterns(base_name, EPHEMERAL_PATTERNS)
+
+
+def _nosync_cleanup(
+    config: CleanupConfig,
+    console: Console,
+    args: argparse.Namespace,
+) -> int:
+    """Remove broken conflict symlinks and orphaned ephemeral .nosync dirs."""
+    import shutil
+
+    directories = [args.dir] if args.dir else config.watch_directories
+    removed = 0
+
+    for directory in directories:
+        if not directory.exists():
+            continue
+        try:
+            for item in directory.rglob("*"):
+                if _is_conflict_symlink(item):
+                    console.print(f"[red]Removing conflict symlink:[/red] {item}")
+                    item.unlink()
+                    removed += 1
+                elif _is_orphaned_ephemeral_nosync(item):
+                    console.print(f"[red]Removing ephemeral .nosync:[/red] {item}")
+                    shutil.rmtree(item)
+                    removed += 1
+        except PermissionError:
+            console.print(f"[yellow]Permission denied: {directory}[/yellow]")
+
+    console.print(f"\n[bold]Removed {removed} items[/bold]")
     return 0
 
 
