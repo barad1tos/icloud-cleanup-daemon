@@ -8,7 +8,7 @@ from icloud_cleanup.config import CleanupConfig
 from icloud_cleanup.modules import discover_modules
 from icloud_cleanup.modules.base import CleanupModule
 
-BUILTIN_MODULE_NAMES = {"icloud_conflicts", "coverage_artifacts"}
+BUILTIN_MODULE_NAMES = {"icloud_conflicts", "coverage_artifacts", "ephemeral_caches"}
 
 
 @pytest.fixture
@@ -72,6 +72,4 @@ class TestDiscoverModules:
 
         assert len(modules) > 0, "Expected at least one module"
         for module in modules:
-            assert isinstance(module, CleanupModule), (
-                f"{module.name} does not satisfy CleanupModule protocol"
-            )
+            assert isinstance(module, CleanupModule), f"{module.name} does not satisfy CleanupModule protocol"

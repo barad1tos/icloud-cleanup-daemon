@@ -71,24 +71,24 @@ class NosyncManager:
             return False
         if path.name.endswith(NOSYNC_SUFFIX):
             return False
-        return NosyncManager._matches_patterns(path.name, DEFAULT_EXCLUDE_PATTERNS)
+        return NosyncManager.matches_patterns(path.name, DEFAULT_EXCLUDE_PATTERNS)
 
     @staticmethod
     def is_valuable_candidate(path: Path) -> bool:
         """Check if a directory is a valuable nosync candidate (slow to rebuild)."""
         if not path.is_dir() or path.name.endswith(NOSYNC_SUFFIX):
             return False
-        return NosyncManager._matches_patterns(path.name, VALUABLE_PATTERNS)
+        return NosyncManager.matches_patterns(path.name, VALUABLE_PATTERNS)
 
     @staticmethod
     def is_ephemeral_candidate(path: Path) -> bool:
         """Check if a directory is an ephemeral cache (fast to regenerate)."""
         if not path.is_dir() or path.name.endswith(NOSYNC_SUFFIX):
             return False
-        return NosyncManager._matches_patterns(path.name, EPHEMERAL_PATTERNS)
+        return NosyncManager.matches_patterns(path.name, EPHEMERAL_PATTERNS)
 
     @staticmethod
-    def _matches_patterns(name: str, patterns: frozenset[str]) -> bool:
+    def matches_patterns(name: str, patterns: frozenset[str]) -> bool:
         """Check a directory name against a set of patterns (exact or wildcard)."""
         for pattern in patterns:
             if pattern.startswith("*"):
