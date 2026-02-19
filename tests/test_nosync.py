@@ -10,6 +10,8 @@ import pytest
 from icloud_cleanup.config import CleanupConfig
 from icloud_cleanup.nosync import (
     DEFAULT_EXCLUDE_PATTERNS,
+    EPHEMERAL_PATTERNS,
+    VALUABLE_PATTERNS,
     NosyncManager,
     NosyncResult,
 )
@@ -385,3 +387,54 @@ class TestWildcardPatterns:
             path = tmp_path / name
             path.mkdir()
             assert not NosyncManager.is_nosync_candidate(path)
+
+
+class TestPatternCategories:
+    """Tests for valuable vs ephemeral pattern split."""
+
+    def test_valuable_patterns_exist(self) -> None:
+        expected = {".venv", "venv", "node_modules", ".env"}
+        assert expected == VALUABLE_PATTERNS
+
+    def test_ephemeral_patterns_exist(self) -> None:
+        expected = {
+            ".mypy_cache",
+            ".ruff_cache",
+            ".pytest_cache",
+            "__pycache__",
+            ".tox",
+            ".nox",
+            "*.egg-info",
+            ".eggs",
+            ".build",
+            "build",
+            "dist",
+            ".cache",
+        }
+        assert expected == EPHEMERAL_PATTERNS
+
+    def test_no_overlap_between_categories(self) -> None:
+        assert VALUABLE_PATTERNS.isdisjoint(EPHEMERAL_PATTERNS)
+
+    def test_default_patterns_is_union(self) -> None:
+        assert DEFAULT_EXCLUDE_PATTERNS == VALUABLE_PATTERNS | EPHEMERAL_PATTERNS
+
+    def test_is_valuable_candidate(self, tmp_path: Path) -> None:
+        venv = tmp_path / ".venv"
+        venv.mkdir()
+        assert NosyncManager.is_valuable_candidate(venv)
+
+    def test_is_ephemeral_candidate(self, tmp_path: Path) -> None:
+        cache = tmp_path / ".mypy_cache"
+        cache.mkdir()
+        assert NosyncManager.is_ephemeral_candidate(cache)
+
+    def test_valuable_not_ephemeral(self, tmp_path: Path) -> None:
+        venv = tmp_path / ".venv"
+        venv.mkdir()
+        assert not NosyncManager.is_ephemeral_candidate(venv)
+
+    def test_ephemeral_not_valuable(self, tmp_path: Path) -> None:
+        cache = tmp_path / "__pycache__"
+        cache.mkdir()
+        assert not NosyncManager.is_valuable_candidate(cache)

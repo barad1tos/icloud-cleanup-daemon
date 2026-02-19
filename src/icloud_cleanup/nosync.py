@@ -12,13 +12,19 @@ if TYPE_CHECKING:
 
 NosyncAction = Literal["converted", "skipped", "error"]
 
-# Common directories that should not be synced
-DEFAULT_EXCLUDE_PATTERNS: frozenset[str] = frozenset(
+# Valuable directories: slow to rebuild, keep nosync+symlink approach
+VALUABLE_PATTERNS: frozenset[str] = frozenset(
     {
         ".venv",
         "venv",
         ".env",
         "node_modules",
+    }
+)
+
+# Ephemeral caches: fast to regenerate, can be deleted outright
+EPHEMERAL_PATTERNS: frozenset[str] = frozenset(
+    {
         "__pycache__",
         ".pytest_cache",
         ".mypy_cache",
@@ -33,6 +39,9 @@ DEFAULT_EXCLUDE_PATTERNS: frozenset[str] = frozenset(
         ".cache",
     }
 )
+
+# Union of both categories — backward compatible
+DEFAULT_EXCLUDE_PATTERNS: frozenset[str] = VALUABLE_PATTERNS | EPHEMERAL_PATTERNS
 
 
 @dataclass
@@ -58,22 +67,33 @@ class NosyncManager:
         """Check if a directory should be excluded from iCloud sync."""
         if not path.is_dir():
             return False
-
-        name = path.name
-
-        # Already a .nosync directory
-        if name.endswith(".nosync"):
+        if path.name.endswith(".nosync"):
             return False
+        return NosyncManager._matches_patterns(path.name, DEFAULT_EXCLUDE_PATTERNS)
 
-        # Check against patterns
-        for pattern in DEFAULT_EXCLUDE_PATTERNS:
+    @staticmethod
+    def is_valuable_candidate(path: Path) -> bool:
+        """Check if a directory is a valuable nosync candidate (slow to rebuild)."""
+        if not path.is_dir() or path.name.endswith(".nosync"):
+            return False
+        return NosyncManager._matches_patterns(path.name, VALUABLE_PATTERNS)
+
+    @staticmethod
+    def is_ephemeral_candidate(path: Path) -> bool:
+        """Check if a directory is an ephemeral cache (fast to regenerate)."""
+        if not path.is_dir() or path.name.endswith(".nosync"):
+            return False
+        return NosyncManager._matches_patterns(path.name, EPHEMERAL_PATTERNS)
+
+    @staticmethod
+    def _matches_patterns(name: str, patterns: frozenset[str]) -> bool:
+        """Check a directory name against a set of patterns (exact or wildcard)."""
+        for pattern in patterns:
             if pattern.startswith("*"):
-                # Wildcard pattern (e.g., *.egg-info)
                 if name.endswith(pattern[1:]):
                     return True
             elif name == pattern:
                 return True
-
         return False
 
     def convert_to_nosync(self, path: Path) -> NosyncResult:

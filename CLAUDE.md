@@ -32,7 +32,7 @@ src/icloud_cleanup/
 ├── watcher.py       # FSEvents-based file system monitoring (watchdog)
 ├── icloud_status.py # iCloud sync status checking
 ├── config.py        # YAML configuration loading/saving
-├── nosync.py        # .nosync directory management for iCloud exclusion
+├── nosync.py        # .nosync directory management (VALUABLE vs EPHEMERAL patterns)
 └── modules/
     ├── __init__.py          # Auto-discovery: discover_modules(config)
     ├── base.py              # CleanupModule Protocol, DetectedFile dataclass
@@ -78,6 +78,15 @@ conflict_pattern: str = r"^(.+)\s+([2-9]|\d{2,})(\.[^.]+)?$"
 **Critical**: Pattern match alone is NOT enough! Must also verify original file exists:
 - ✅ `document 2.txt` when `document.txt` exists → real conflict
 - ❌ `April 2025.pdf` when `April.pdf` doesn't exist → NOT a conflict (just a filename with year)
+
+### Nosync Pattern Categories
+
+Directories excluded from iCloud sync are split into two categories in `nosync.py`:
+
+- **Valuable** (`VALUABLE_PATTERNS`): `.venv`, `venv`, `node_modules`, `.env` — slow to rebuild, use nosync+symlink
+- **Ephemeral** (`EPHEMERAL_PATTERNS`): `__pycache__`, `.mypy_cache`, `.ruff_cache`, `build`, `dist`, etc. — fast to regenerate, can be deleted
+
+`DEFAULT_EXCLUDE_PATTERNS` is the union of both, maintaining backward compatibility.
 
 ### Safety Features
 - **Protected paths**: `/System`, `/Applications`, `/Library`, etc. are blocked from deletion
