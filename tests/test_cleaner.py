@@ -496,3 +496,88 @@ class TestDeleteDetected:
         assert not result.success
         assert result.action == "skipped"
         assert target.exists()
+
+
+class TestDeleteDirectory:
+    """Tests for directory deletion via delete_detected."""
+
+    def test_delete_directory_without_recovery(
+        self, config: CleanupConfig, logger: logging.Logger, tmp_path: Path
+    ) -> None:
+        """Test that directories are deleted with shutil.rmtree when recovery is off."""
+        from icloud_cleanup.modules.base import DetectedFile
+
+        config.enable_recovery = True
+        cleaner = Cleaner(config, logger)
+
+        target = tmp_path / ".mypy_cache"
+        target.mkdir()
+        (target / "subdir").mkdir()
+        (target / "subdir" / "file.json").write_text("{}")
+
+        detected = DetectedFile(
+            path=target,
+            module_name="ephemeral_caches",
+            reason="Ephemeral cache directory",
+            recovery_enabled=False,
+        )
+
+        with patch.object(cleaner, "is_path_protected", return_value=False):
+            result = cleaner.delete_detected(detected)
+
+        assert result.success
+        assert result.action == "deleted"
+        assert not target.exists()
+
+    def test_delete_directory_with_recovery(self, cleaner: Cleaner, tmp_path: Path) -> None:
+        """Test that directories are moved to recovery when recovery is enabled."""
+        from icloud_cleanup.modules.base import DetectedFile
+
+        target = tmp_path / "somedir"
+        target.mkdir()
+        (target / "file.txt").write_text("content")
+
+        detected = DetectedFile(
+            path=target,
+            module_name="test",
+            reason="test",
+            recovery_enabled=True,
+        )
+
+        with patch.object(cleaner, "is_path_protected", return_value=False):
+            result = cleaner.delete_detected(detected)
+
+        assert result.success
+        assert result.action == "recovered"
+        assert not target.exists()
+        assert result.recovery_path is not None
+
+    def test_delete_directory_permission_error(
+        self, config: CleanupConfig, logger: logging.Logger, tmp_path: Path
+    ) -> None:
+        """Test that PermissionError on directory deletion is handled gracefully."""
+        from icloud_cleanup.modules.base import DetectedFile
+
+        config.enable_recovery = False
+        config.recovery_dir = tmp_path / "recovery"
+        cleaner = Cleaner(config, logger)
+
+        target = tmp_path / ".ruff_cache"
+        target.mkdir()
+
+        detected = DetectedFile(
+            path=target,
+            module_name="ephemeral_caches",
+            reason="test",
+            recovery_enabled=False,
+        )
+
+        with (
+            patch.object(cleaner, "is_path_protected", return_value=False),
+            patch("icloud_cleanup.cleaner.shutil.rmtree", side_effect=PermissionError("denied")),
+        ):
+            result = cleaner.delete_detected(detected)
+
+        assert not result.success
+        assert result.action == "error"
+        assert "permission denied" in result.error.lower()

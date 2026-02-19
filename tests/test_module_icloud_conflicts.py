@@ -337,3 +337,57 @@ class TestConflictFileOriginalPath:
 
         assert "report 2.pdf" in result
         assert "report.pdf" in result
+
+
+class TestEDEADLKHandling:
+    """Tests for EDEADLK (errno 11) transient error handling in scan_directory."""
+
+    def test_edeadlk_skipped_gracefully(self, module: ICloudConflictsModule, tmp_path: Path) -> None:
+        """EDEADLK errors should be logged as a warning and skipped."""
+        import errno
+        from unittest.mock import patch
+
+        (tmp_path / "document.txt").write_text("original")
+        (tmp_path / "document 2.txt").write_text("conflict")
+
+        edeadlk = OSError(errno.EDEADLK, "Resource deadlock avoided")
+        with patch.object(module, "is_target", side_effect=edeadlk):
+            detected = module.scan_directory(tmp_path)
+
+        assert detected == []
+
+    def test_edeadlk_does_not_stop_scan(self, module: ICloudConflictsModule, tmp_path: Path) -> None:
+        """EDEADLK on one file should not prevent scanning subsequent files."""
+        import errno
+        from unittest.mock import patch
+
+        (tmp_path / "doc1.txt").write_text("a")
+        (tmp_path / "doc1 2.txt").write_text("b")
+
+        (tmp_path / "doc2.txt").write_text("c")
+        (tmp_path / "doc2 2.txt").write_text("d")
+
+        original_is_target = module.is_target
+
+        def side_effect(path: Path) -> DetectedFile | None:
+            if path.name == "doc1 2.txt":
+                raise OSError(errno.EDEADLK, "Resource deadlock avoided")
+            return original_is_target(path)
+
+        with patch.object(module, "is_target", side_effect=side_effect):
+            detected = module.scan_directory(tmp_path)
+
+        assert len(detected) == 1
+        assert detected[0].path.name == "doc2 2.txt"
+
+    def test_non_edeadlk_oserror_propagates(self, module: ICloudConflictsModule, tmp_path: Path) -> None:
+        """OSError with a different errno should still propagate."""
+        import errno
+        from unittest.mock import patch
+
+        (tmp_path / "document.txt").write_text("original")
+        (tmp_path / "document 2.txt").write_text("conflict")
+
+        eio = OSError(errno.EIO, "Input/output error")
+        with patch.object(module, "is_target", side_effect=eio), pytest.raises(OSError, match="Input/output error"):
+            module.scan_directory(tmp_path)

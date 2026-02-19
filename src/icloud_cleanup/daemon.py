@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import errno
 import logging
 import signal
 from collections import defaultdict
@@ -18,6 +19,7 @@ from .cleaner import Cleaner, CleanupResult
 from .detector import ConflictDetector, ConflictFile
 from .icloud_status import ICloudStatusChecker
 from .modules import discover_modules
+from .nosync import NOSYNC_SUFFIX, NosyncManager
 from .watcher import FileWatcher
 
 if TYPE_CHECKING:
@@ -59,6 +61,7 @@ class ICloudCleanupDaemon:
         self.checker = ICloudStatusChecker(config)
         self.cleaner = Cleaner(config, self.logger)
         self.watcher = FileWatcher(config, self.detector, self.logger, modules=self.modules)
+        self.nosync_manager = NosyncManager(config, self.logger)
 
         # State
         self.stats = DaemonStats(start_time=datetime.now())
@@ -198,6 +201,14 @@ class ICloudCleanupDaemon:
             self._failed_deletes.pop(path, None)
             return
 
+        # EDEADLK is transient -- skip without counting
+        if result.error and f"Errno {errno.EDEADLK}" in result.error:
+            self.logger.debug(
+                "EDEADLK transient for %s, retry next scan",
+                path.name,
+            )
+            return
+
         self.stats.errors += 1
         new_count = failure_count + 1
         self._failed_deletes[path] = (new_count, current_time)
@@ -237,9 +248,53 @@ class ICloudCleanupDaemon:
             elif conflict := self.detector.is_conflict_file(path):
                 await self._process_conflict(conflict)
 
+    def _run_symlink_guardian(self, directory: Path) -> None:
+        """Walk a directory tree and repair broken .nosync symlinks.
+
+        Recursively visits subdirectories, skipping symlinks and .nosync
+        directories to avoid infinite loops and unnecessary traversal.
+
+        Args:
+            directory: Root directory to scan for broken symlinks.
+        """
+        try:
+            results = self.nosync_manager.verify_and_repair(directory)
+        except PermissionError:
+            self.logger.warning("Permission denied during symlink guardian: %s", directory)
+            return
+
+        for result in results:
+            if result.action == "repaired":
+                self.logger.info("Symlink repaired: %s — %s", result.original_name, result.detail)
+            elif result.action == "warning":
+                self.logger.warning("Symlink warning: %s — %s", result.original_name, result.detail)
+            elif result.action == "error":
+                self.logger.error("Symlink error: %s — %s", result.original_name, result.detail)
+
+        # Recurse into subdirectories (skip symlinks and .nosync dirs)
+        try:
+            children = sorted(directory.iterdir())
+        except PermissionError:
+            self.logger.warning("Permission denied listing: %s", directory)
+            return
+
+        for child in children:
+            if child.is_symlink():
+                continue
+            if not child.is_dir():
+                continue
+            if child.name.endswith(NOSYNC_SUFFIX):
+                continue
+            self._run_symlink_guardian(child)
+
     def _scan_and_queue(self) -> None:
         """Scan all directories using all modules and queue files for deletion."""
         current_time = asyncio.get_running_loop().time()
+
+        # Symlink guardian: repair broken .nosync symlinks before module scan
+        if self.config.nosync_auto_repair:
+            for directory in self.config.watch_directories:
+                self._run_symlink_guardian(directory)
 
         # Scan via all modules
         for module in self.modules:

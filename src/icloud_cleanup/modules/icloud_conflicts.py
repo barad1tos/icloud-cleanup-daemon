@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import errno
 import logging
 import re
 from dataclasses import dataclass
@@ -96,6 +97,11 @@ class ICloudConflictsModule:
                 except PermissionError:
                     logger.debug("Permission denied checking: %s", path)
                     continue
+                except OSError as exc:
+                    if exc.errno == errno.EDEADLK:
+                        logger.warning("EDEADLK (iCloud transient) — skipping: %s", path)
+                        continue
+                    raise
                 if result:
                     detected.append(result)
         except PermissionError:

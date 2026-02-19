@@ -59,6 +59,11 @@ class CleanupConfig:
     # Module settings
     modules_disabled: list[str] = field(default_factory=list)
 
+    # Nosync settings
+    nosync_auto_repair: bool = True
+    nosync_valuable_patterns: list[str] = field(default_factory=list)
+    nosync_ephemeral_patterns: list[str] = field(default_factory=list)
+
     @classmethod
     def get_config_path(cls) -> Path:
         """Return the platform-specific default config file path (macOS Application Support)."""
@@ -109,6 +114,7 @@ class CleanupConfig:
         cls._apply_recovery_config(config, data.get("recovery", {}))
         cls._apply_logging_config(config, data.get("logging", {}))
         cls._apply_modules_config(config, data.get("modules", {}))
+        cls._apply_nosync_config(config, data.get("nosync", {}))
 
         cls._validate(config)
 
@@ -152,6 +158,17 @@ class CleanupConfig:
             config.modules_disabled = [str(name) for name in disabled]
 
     @classmethod
+    def _apply_nosync_config(cls, config: CleanupConfig, nosync_cfg: dict[str, Any]) -> None:
+        """Apply nosync settings from config dict."""
+        config.nosync_auto_repair = parse_bool(nosync_cfg.get("auto_repair"), config.nosync_auto_repair)
+        valuable = nosync_cfg.get("valuable_patterns", [])
+        if isinstance(valuable, list):
+            config.nosync_valuable_patterns = [str(p) for p in valuable]
+        ephemeral = nosync_cfg.get("ephemeral_patterns", [])
+        if isinstance(ephemeral, list):
+            config.nosync_ephemeral_patterns = [str(p) for p in ephemeral]
+
+    @classmethod
     def _get_default_watch_directories(cls) -> list[Path]:
         """Get default iCloud directories to watch."""
         icloud_base = Path.home() / "Library/Mobile Documents"
@@ -191,6 +208,11 @@ class CleanupConfig:
             },
             "modules": {
                 "disabled": self.modules_disabled,
+            },
+            "nosync": {
+                "auto_repair": self.nosync_auto_repair,
+                "valuable_patterns": self.nosync_valuable_patterns,
+                "ephemeral_patterns": self.nosync_ephemeral_patterns,
             },
         }
 

@@ -135,8 +135,12 @@ class Cleaner:
                     recovery_path=recovery_path,
                 )
 
-            path.unlink()
-            self.logger.info("Deleted file: %s", path)
+            if path.is_dir() and not path.is_symlink():
+                shutil.rmtree(path)
+                self.logger.info("Deleted directory: %s", path)
+            else:
+                path.unlink()
+                self.logger.info("Deleted file: %s", path)
             return CleanupResult(
                 path=path,
                 success=True,

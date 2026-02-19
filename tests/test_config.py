@@ -293,6 +293,52 @@ class TestConfigPath:
         assert config.wait_before_delete == 42
 
 
+class TestNosyncConfig:
+    """Tests for nosync configuration section."""
+
+    def test_default_nosync_auto_repair(self) -> None:
+        config = CleanupConfig()
+        assert config.nosync_auto_repair is True
+
+    def test_default_nosync_patterns_empty(self) -> None:
+        config = CleanupConfig()
+        assert config.nosync_valuable_patterns == []
+        assert config.nosync_ephemeral_patterns == []
+
+    def test_load_nosync_config(self, tmp_path: Path) -> None:
+        config_file = tmp_path / "config.yaml"
+        config_file.write_text(
+            "nosync:\n"
+            "  auto_repair: false\n"
+            "  valuable_patterns:\n"
+            "    - .venv\n"
+            "  ephemeral_patterns:\n"
+            "    - .mypy_cache\n"
+        )
+        config = CleanupConfig.load(config_file)
+        assert config.nosync_auto_repair is False
+        assert config.nosync_valuable_patterns == [".venv"]
+        assert config.nosync_ephemeral_patterns == [".mypy_cache"]
+
+    def test_nosync_config_missing_uses_defaults(self, tmp_path: Path) -> None:
+        config_file = tmp_path / "config.yaml"
+        config_file.write_text("scan_interval: 30\n")
+        config = CleanupConfig.load(config_file)
+        assert config.nosync_auto_repair is True
+        assert config.nosync_valuable_patterns == []
+
+    def test_nosync_config_saved(self, tmp_path: Path) -> None:
+        config = CleanupConfig()
+        config.nosync_auto_repair = False
+        config.nosync_valuable_patterns = [".venv"]
+        config_file = tmp_path / "config.yaml"
+        config.save(config_file)
+
+        loaded = CleanupConfig.load(config_file)
+        assert loaded.nosync_auto_repair is False
+        assert loaded.nosync_valuable_patterns == [".venv"]
+
+
 class TestWatchDirectories:
     """Tests for watch directory handling."""
 

@@ -32,12 +32,13 @@ src/icloud_cleanup/
 ├── watcher.py       # FSEvents-based file system monitoring (watchdog)
 ├── icloud_status.py # iCloud sync status checking
 ├── config.py        # YAML configuration loading/saving
-├── nosync.py        # .nosync directory management for iCloud exclusion
+├── nosync.py        # .nosync directory management (VALUABLE vs EPHEMERAL patterns)
 └── modules/
     ├── __init__.py          # Auto-discovery: discover_modules(config)
     ├── base.py              # CleanupModule Protocol, DetectedFile dataclass
-    ├── icloud_conflicts.py  # iCloud conflict files (filename 2.ext)
-    └── coverage_artifacts.py # Stale .coverage.host.pidN.hash files
+    ├── icloud_conflicts.py  # iCloud conflict files (filename 2.ext, 3.ext, etc.)
+    ├── coverage_artifacts.py # Stale .coverage.host.pidN.hash files
+    └── ephemeral_caches.py  # Regenerable cache dirs (__pycache__, etc.)
 ```
 
 **Data flow:**
@@ -46,6 +47,7 @@ src/icloud_cleanup/
 3. `FileWatcher` monitors directories in real-time; modules with `supports_watch=True` get checked on events
 4. `ICloudStatusChecker` waits for iCloud sync (only for files with `recovery_enabled=True`)
 5. `Cleaner.delete_detected()` handles deletion — recovery or direct unlink per `DetectedFile.recovery_enabled`
+6. `NosyncManager.verify_and_repair()` auto-repairs broken symlinks for valuable `.nosync` dirs (daemon runs this each scan cycle when `nosync.auto_repair` is enabled)
 
 ### Module System
 
@@ -78,6 +80,15 @@ conflict_pattern: str = r"^(.+)\s+([2-9]|\d{2,})(\.[^.]+)?$"
 **Critical**: Pattern match alone is NOT enough! Must also verify original file exists:
 - ✅ `document 2.txt` when `document.txt` exists → real conflict
 - ❌ `April 2025.pdf` when `April.pdf` doesn't exist → NOT a conflict (just a filename with year)
+
+### Nosync Pattern Categories
+
+Directories excluded from iCloud sync are split into two categories in `nosync.py`:
+
+- **Valuable** (`VALUABLE_PATTERNS`): `.venv`, `venv`, `node_modules`, `.env` — slow to rebuild, use nosync+symlink
+- **Ephemeral** (`EPHEMERAL_PATTERNS`): `__pycache__`, `.mypy_cache`, `.ruff_cache`, `build`, `dist`, etc. — fast to regenerate, can be deleted
+
+`DEFAULT_EXCLUDE_PATTERNS` is the union of both, maintaining backward compatibility.
 
 ### Safety Features
 - **Protected paths**: `/System`, `/Applications`, `/Library`, etc. are blocked from deletion
@@ -137,6 +148,9 @@ Key settings:
 - `recovery.enabled`: Move to trash instead of delete (default: true)
 - `recovery.retention_days`: Days to keep deleted files (default: 7)
 - `modules.disabled`: List of module names to disable (default: empty)
+- `nosync.auto_repair`: Auto-repair broken nosync symlinks in daemon (default: true)
+- `nosync.valuable_patterns`: Extra patterns for valuable dirs (default: empty)
+- `nosync.ephemeral_patterns`: Extra patterns for ephemeral dirs (default: empty, also used by `--cleanup`)
 
 ## Git Workflow
 
