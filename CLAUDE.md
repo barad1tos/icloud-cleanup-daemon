@@ -146,6 +146,9 @@ Key settings:
 - `recovery.enabled`: Move to trash instead of delete (default: true)
 - `recovery.retention_days`: Days to keep deleted files (default: 7)
 - `modules.disabled`: List of module names to disable (default: empty)
+- `nosync.auto_repair`: Auto-repair broken nosync symlinks in daemon (default: true)
+- `nosync.valuable_patterns`: Extra patterns for valuable dirs (default: empty)
+- `nosync.ephemeral_patterns`: Extra patterns for ephemeral dirs (default: empty)
 
 ## Git Workflow
 

@@ -12,6 +12,8 @@ if TYPE_CHECKING:
 
 NosyncAction = Literal["converted", "skipped", "error"]
 
+NOSYNC_SUFFIX: str = ".nosync"
+
 # Valuable directories: slow to rebuild, keep nosync+symlink approach
 VALUABLE_PATTERNS: frozenset[str] = frozenset(
     {
@@ -67,21 +69,21 @@ class NosyncManager:
         """Check if a directory should be excluded from iCloud sync."""
         if not path.is_dir():
             return False
-        if path.name.endswith(".nosync"):
+        if path.name.endswith(NOSYNC_SUFFIX):
             return False
         return NosyncManager._matches_patterns(path.name, DEFAULT_EXCLUDE_PATTERNS)
 
     @staticmethod
     def is_valuable_candidate(path: Path) -> bool:
         """Check if a directory is a valuable nosync candidate (slow to rebuild)."""
-        if not path.is_dir() or path.name.endswith(".nosync"):
+        if not path.is_dir() or path.name.endswith(NOSYNC_SUFFIX):
             return False
         return NosyncManager._matches_patterns(path.name, VALUABLE_PATTERNS)
 
     @staticmethod
     def is_ephemeral_candidate(path: Path) -> bool:
         """Check if a directory is an ephemeral cache (fast to regenerate)."""
-        if not path.is_dir() or path.name.endswith(".nosync"):
+        if not path.is_dir() or path.name.endswith(NOSYNC_SUFFIX):
             return False
         return NosyncManager._matches_patterns(path.name, EPHEMERAL_PATTERNS)
 
@@ -122,7 +124,7 @@ class NosyncManager:
                 error="Already a symlink",
             )
 
-        nosync_path = path.parent / f"{path.name}.nosync"
+        nosync_path = path.parent / f"{path.name}{NOSYNC_SUFFIX}"
 
         if nosync_path.exists():
             return NosyncResult(
@@ -197,7 +199,7 @@ class NosyncManager:
                 if is_candidate:
                     candidates.append(item)
                     skip_prefixes.append(f"{item_str}/")
-                elif item.is_dir() and item.name.endswith(".nosync"):
+                elif item.is_dir() and item.name.endswith(NOSYNC_SUFFIX):
                     skip_prefixes.append(f"{item_str}/")
         except PermissionError:
             self.logger.warning("Permission denied scanning: %s", directory)
