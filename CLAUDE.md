@@ -138,6 +138,8 @@ When modifying this codebase, watch out for:
 
 8. **IDE warnings are action items**: When the user shares IDE diagnostics, LanguageTool warnings, or any code quality feedback — always fix them immediately. Do not dismiss them as cosmetic or non-blocking. The project maintains clean grammar in docstrings and comments, including proper use of articles (`a`, `an`, `the`) in English text.
 
+9. **EDEADLK in iCloud paths**: `path.is_file()`, `path.exists()`, and `rglob()` can raise `OSError(errno.EDEADLK)` when iCloud can't stat files inside `.nosync` dirs. Always wrap these calls with `except OSError` and check `exc.errno == errno.EDEADLK` — log and skip, never crash. Both `scan_directory` (inner + outer) and `watcher._check_path` need this protection.
+
 ## Configuration
 
 Default config location: `~/Library/Application Support/icloud-cleanup/config.yaml`
