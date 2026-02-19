@@ -83,29 +83,36 @@ class ICloudConflictsModule:
             recovery_enabled=True,
         )
 
+    def _check_single_path(self, path: Path) -> DetectedFile | None:
+        """Check a single path, handling iCloud transient errors."""
+        try:
+            return self.is_target(path)
+        except PermissionError:
+            logger.debug("Permission denied checking: %s", path)
+        except OSError as exc:
+            if exc.errno == errno.EDEADLK:
+                logger.warning("EDEADLK (iCloud transient) — skipping: %s", path)
+            else:
+                raise
+        return None
+
     def scan_directory(self, directory: Path) -> list[DetectedFile]:
         """Scan a directory for conflict files."""
-        detected: list[DetectedFile] = []
-
         if not directory.exists():
-            return detected
+            return []
 
+        detected: list[DetectedFile] = []
         try:
             for path in directory.rglob("*"):
-                try:
-                    result = self.is_target(path)
-                except PermissionError:
-                    logger.debug("Permission denied checking: %s", path)
-                    continue
-                except OSError as exc:
-                    if exc.errno == errno.EDEADLK:
-                        logger.warning("EDEADLK (iCloud transient) — skipping: %s", path)
-                        continue
-                    raise
-                if result:
+                if result := self._check_single_path(path):
                     detected.append(result)
         except PermissionError:
             logger.warning("Permission denied scanning: %s", directory)
+        except OSError as exc:
+            if exc.errno == errno.EDEADLK:
+                logger.warning("EDEADLK (iCloud transient) during rglob — aborting scan: %s", directory)
+            else:
+                raise
 
         return detected
 

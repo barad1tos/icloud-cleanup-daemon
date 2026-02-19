@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import errno
 import logging
 from collections.abc import Callable
 from pathlib import Path
@@ -65,13 +66,27 @@ class ConflictEventHandler(FileSystemEventHandler):
 
         """
         for module in self._watch_modules:
-            if detected := module.is_target(path):
+            try:
+                detected = module.is_target(path)
+            except OSError as exc:
+                if exc.errno == errno.EDEADLK:
+                    self.logger.debug("EDEADLK (iCloud transient) in watcher — skipping: %s", path)
+                    return
+                raise
+            if detected:
                 self.logger.debug("Detected [%s]: %s", detected.module_name, path.name)
                 self.callback(path, detected)
                 return
 
         # Legacy detector fallback — wrap in a DetectedFile for the unified pipeline
-        if self.detector.is_conflict_file(path):
+        try:
+            is_conflict = self.detector.is_conflict_file(path)
+        except OSError as exc:
+            if exc.errno == errno.EDEADLK:
+                self.logger.debug("EDEADLK (iCloud transient) in watcher — skipping: %s", path)
+                return
+            raise
+        if is_conflict:
             detected = DetectedFile(
                 path=path,
                 module_name="icloud_conflicts",
