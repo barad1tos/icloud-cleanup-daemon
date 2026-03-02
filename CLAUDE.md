@@ -221,3 +221,4 @@ git push -u origin main
 ```
 
 Note: Use full path `/opt/homebrew/bin/gh` — the `gh` alias routes through 1Password which requires interactive terminal
+

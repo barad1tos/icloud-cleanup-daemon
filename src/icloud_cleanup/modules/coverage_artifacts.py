@@ -32,7 +32,8 @@ class CoverageArtifactsModule:
     def __init__(self, config: CleanupConfig) -> None:
         self.config = config
 
-    def can_match(self, name: str) -> bool:
+    @staticmethod
+    def can_match(name: str) -> bool:
         """Check if a filename could be a coverage artifact (regex only, no I/O)."""
         return _PATTERN.match(name) is not None
 

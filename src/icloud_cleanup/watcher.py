@@ -64,7 +64,7 @@ class FileWatcher:
         self._running = False
 
     def enqueue_path(self, path: Path) -> None:
-        """Add a path to the buffer (called from watchdog thread)."""
+        """Add a path to the buffer (called from the watchdog thread)."""
         with self._lock:
             self._paths.add(path)
 
