@@ -38,16 +38,16 @@ class TestDetectedFile:
         )
 
         with pytest.raises(FrozenInstanceError):
-            detected.path = tmp_path / "other.txt"  # type: ignore[misc]
+            setattr(detected, "path", tmp_path / "other.txt")  # noqa: B010
 
         with pytest.raises(FrozenInstanceError):
-            detected.module_name = "changed"  # type: ignore[misc]
+            setattr(detected, "module_name", "changed")  # noqa: B010
 
         with pytest.raises(FrozenInstanceError):
-            detected.reason = "changed"  # type: ignore[misc]
+            setattr(detected, "reason", "changed")  # noqa: B010
 
         with pytest.raises(FrozenInstanceError):
-            detected.recovery_enabled = True  # type: ignore[misc]
+            setattr(detected, "recovery_enabled", True)  # noqa: B010
 
     def test_equality_same_values(self, tmp_path: Path) -> None:
         """Test that two DetectedFile instances with identical values are equal."""
@@ -85,27 +85,25 @@ class TestDetectedFile:
         assert first != second
 
     @pytest.mark.parametrize(
-        "field,value_a,value_b",
+        "a,b",
         [
-            ("module_name", "module_a", "module_b"),
-            ("reason", "reason one", "reason two"),
-            ("recovery_enabled", True, False),
+            (
+                DetectedFile(path=Path("/f"), module_name="module_a", reason="r", recovery_enabled=True),
+                DetectedFile(path=Path("/f"), module_name="module_b", reason="r", recovery_enabled=True),
+            ),
+            (
+                DetectedFile(path=Path("/f"), module_name="m", reason="reason one", recovery_enabled=True),
+                DetectedFile(path=Path("/f"), module_name="m", reason="reason two", recovery_enabled=True),
+            ),
+            (
+                DetectedFile(path=Path("/f"), module_name="m", reason="r", recovery_enabled=True),
+                DetectedFile(path=Path("/f"), module_name="m", reason="r", recovery_enabled=False),
+            ),
         ],
     )
-    def test_inequality_per_field(self, tmp_path: Path, field: str, value_a: object, value_b: object) -> None:
+    def test_inequality_per_field(self, a: DetectedFile, b: DetectedFile) -> None:
         """Test that differing any single field produces inequality."""
-        file_path = tmp_path / "file.txt"
-        base_kwargs = {
-            "path": file_path,
-            "module_name": "mod",
-            "reason": "reason",
-            "recovery_enabled": True,
-        }
-
-        kwargs_a = {**base_kwargs, field: value_a}
-        kwargs_b = {**base_kwargs, field: value_b}
-
-        assert DetectedFile(**kwargs_a) != DetectedFile(**kwargs_b)
+        assert a != b
 
     def test_hash_consistency(self, tmp_path: Path) -> None:
         """Test that equal DetectedFile instances produce the same hash."""

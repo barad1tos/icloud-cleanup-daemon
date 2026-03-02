@@ -52,7 +52,8 @@ class CleanupConfig:
     log_level: str = "INFO"
 
     # Daemon settings
-    scan_interval: int = 60  # Seconds between full scans (when not using FSEvents)
+    scan_interval: int = 300  # FSEvents handles real-time; full scan is a safety net
+    guardian_interval_cycles: int = 5  # Run symlink guardian every Nth scan cycle
     max_delete_retries: int = 3  # Max attempts to delete a file before cooldown
     retry_cooldown: int = 3600  # Seconds to wait after max retries before trying again
 
@@ -109,6 +110,7 @@ class CleanupConfig:
         config.icloud_poll_interval = int(data.get("icloud_poll_interval", config.icloud_poll_interval))
         config.max_icloud_wait = int(data.get("max_icloud_wait", config.max_icloud_wait))
         config.scan_interval = int(data.get("scan_interval", config.scan_interval))
+        config.guardian_interval_cycles = int(data.get("guardian_interval_cycles", config.guardian_interval_cycles))
 
         # Nested sections
         cls._apply_recovery_config(config, data.get("recovery", {}))
@@ -131,6 +133,9 @@ class CleanupConfig:
             raise ValueError(msg)
         if config.icloud_poll_interval <= 0:
             msg = f"icloud_poll_interval must be positive, got {config.icloud_poll_interval}"
+            raise ValueError(msg)
+        if config.guardian_interval_cycles <= 0:
+            msg = f"guardian_interval_cycles must be positive, got {config.guardian_interval_cycles}"
             raise ValueError(msg)
 
     @classmethod
@@ -197,6 +202,7 @@ class CleanupConfig:
             "icloud_poll_interval": self.icloud_poll_interval,
             "max_icloud_wait": self.max_icloud_wait,
             "scan_interval": self.scan_interval,
+            "guardian_interval_cycles": self.guardian_interval_cycles,
             "recovery": {
                 "enabled": self.enable_recovery,
                 "directory": str(self.recovery_dir),

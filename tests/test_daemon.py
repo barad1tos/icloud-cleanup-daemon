@@ -240,6 +240,68 @@ class TestRetryLimit:
         assert failure_count == 1
 
 
+class TestGuardianCycleCounter:
+    """Tests for guardian interval cycle logic."""
+
+    @pytest.mark.asyncio
+    async def test_guardian_runs_on_first_cycle(self, tmp_path: Path) -> None:
+        """Verify guardian runs on the very first scan (cycle 0)."""
+        config = CleanupConfig()
+        config.watch_directories = [tmp_path]
+        config.nosync_auto_repair = True
+        config.guardian_interval_cycles = 5
+        config.log_file = tmp_path / "test.log"
+        config.recovery_dir = tmp_path / "recovery"
+        daemon = ICloudCleanupDaemon(config)
+
+        nosync = tmp_path / ".venv.nosync"
+        nosync.mkdir()
+
+        daemon._scan_and_queue()
+
+        assert daemon._guardian_cycle_count == 1
+        assert (tmp_path / ".venv").is_symlink()
+
+    @pytest.mark.asyncio
+    async def test_guardian_skips_intermediate_cycles(self, tmp_path: Path) -> None:
+        """Verify guardian does not run on non-Nth cycles."""
+        config = CleanupConfig()
+        config.watch_directories = [tmp_path]
+        config.nosync_auto_repair = True
+        config.guardian_interval_cycles = 3
+        config.log_file = tmp_path / "test.log"
+        config.recovery_dir = tmp_path / "recovery"
+        daemon = ICloudCleanupDaemon(config)
+
+        # First call (cycle 0) — guardian runs
+        daemon._scan_and_queue()
+        assert daemon._guardian_cycle_count == 1
+
+        # Create a new broken symlink after the first scan
+        nosync = tmp_path / "node_modules.nosync"
+        nosync.mkdir()
+
+        # Second call (cycle 1) — guardian skipped
+        daemon._scan_and_queue()
+        assert daemon._guardian_cycle_count == 2
+        assert not (tmp_path / "node_modules").exists()
+
+        # Third call (cycle 2) — guardian skipped
+        daemon._scan_and_queue()
+        assert daemon._guardian_cycle_count == 3
+        assert not (tmp_path / "node_modules").exists()
+
+        # Fourth call (cycle 3) — guardian runs again (3 % 3 == 0)
+        daemon._scan_and_queue()
+        assert daemon._guardian_cycle_count == 4
+        assert (tmp_path / "node_modules").is_symlink()
+
+    @pytest.mark.asyncio
+    async def test_guardian_counter_starts_at_zero(self, daemon: ICloudCleanupDaemon) -> None:
+        """Verify the cycle counter initializes to zero."""
+        assert daemon._guardian_cycle_count == 0
+
+
 class TestSymlinkGuardianIntegration:
     """Tests for symlink guardian in daemon."""
 
@@ -349,7 +411,7 @@ class TestSymlinkGuardianIntegration:
 
     @pytest.mark.asyncio
     async def test_scan_handles_permission_error(self, tmp_path: Path) -> None:
-        """Verify that PermissionError during guardian walk is caught."""
+        """Verify that PermissionError during a guardian walk is caught."""
         config = CleanupConfig()
         config.watch_directories = [tmp_path]
         config.nosync_auto_repair = True

@@ -62,7 +62,8 @@ class TestCleanupConfigDefaults:
         assert config.enable_recovery is True
         assert config.recovery_retention_days == 7
         assert config.log_level == "INFO"
-        assert config.scan_interval == 60
+        assert config.scan_interval == 300
+        assert config.guardian_interval_cycles == 5
 
     def test_default_conflict_pattern(self) -> None:
         """Test the default conflict pattern matches expected files."""
@@ -83,7 +84,7 @@ class TestCleanupConfigDefaults:
         assert pattern.match("2 file.txt") is None
 
     def test_default_recovery_dir(self) -> None:
-        """Test default recovery directory location."""
+        """Test the default recovery directory location."""
         config = CleanupConfig()
         assert config.recovery_dir == Path.home() / ".icloud-cleanup-trash"
 
@@ -95,10 +96,10 @@ class TestCleanupConfigDefaults:
 
 
 class TestConfigLoad:
-    """Tests for loading configuration from file."""
+    """Tests for loading configuration from a file."""
 
     def test_load_nonexistent_file(self, tmp_path: Path) -> None:
-        """Test loading returns defaults when file doesn't exist."""
+        """Test that loading returns defaults when the file doesn't exist."""
         config_path = tmp_path / "nonexistent.yaml"
         config = CleanupConfig.load(config_path)
 
@@ -106,7 +107,7 @@ class TestConfigLoad:
         assert config.enable_recovery is True
 
     def test_load_empty_file(self, tmp_path: Path) -> None:
-        """Test loading empty file returns defaults."""
+        """Test that loading an empty file returns defaults."""
         config_path = tmp_path / "empty.yaml"
         config_path.touch()
 
@@ -212,9 +213,24 @@ class TestConfigLoad:
         with pytest.raises(ValueError, match="icloud_poll_interval must be positive"):
             CleanupConfig.load(config_path)
 
+    def test_load_zero_guardian_interval_raises(self, tmp_path: Path) -> None:
+        """Test that a zero guardian_interval_cycles raises ValueError."""
+        config_path = tmp_path / "bad_guardian.yaml"
+        config_path.write_text("guardian_interval_cycles: 0\n")
+
+        with pytest.raises(ValueError, match="guardian_interval_cycles must be positive"):
+            CleanupConfig.load(config_path)
+
+    def test_load_guardian_interval_from_yaml(self, tmp_path: Path) -> None:
+        """Test that guardian_interval_cycles is loaded from YAML."""
+        config_path = tmp_path / "guardian.yaml"
+        config_path.write_text("guardian_interval_cycles: 10\n")
+        config = CleanupConfig.load(config_path)
+        assert config.guardian_interval_cycles == 10
+
     @staticmethod
     def _load_config_from_text(tmp_path: Path, filename: str, content: str) -> CleanupConfig:
-        """Create a config file with given content and load it."""
+        """Create a config file with the given content and load it."""
         config_path = tmp_path / filename
         config_path.write_text(content)
         return CleanupConfig.load(config_path)
@@ -253,8 +269,18 @@ class TestConfigSave:
         assert loaded.log_level == "DEBUG"
         assert len(loaded.watch_directories) == 2
 
+    def test_guardian_interval_cycles_roundtrip(self, tmp_path: Path) -> None:
+        """Test that guardian_interval_cycles survives save/load roundtrip."""
+        config_path = tmp_path / "guardian_rt.yaml"
+        original = CleanupConfig()
+        original.guardian_interval_cycles = 10
+        original.save(config_path)
+
+        loaded = CleanupConfig.load(config_path)
+        assert loaded.guardian_interval_cycles == 10
+
     def test_save_format(self, tmp_path: Path) -> None:
-        """Test that saved YAML has expected structure."""
+        """Test that saved YAML has the expected structure."""
         config_path = tmp_path / "format.yaml"
         config = CleanupConfig()
         config.save(config_path)
@@ -282,7 +308,7 @@ class TestConfigPath:
 
     def test_load_uses_default_path(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         """Test that load() uses the default path when no path is specified."""
-        # Create config at custom default path
+        # Create config at the custom default path
         custom_default = tmp_path / "default_config.yaml"
         monkeypatch.setattr(CleanupConfig, "get_config_path", classmethod(lambda cls: custom_default))
 
@@ -294,7 +320,7 @@ class TestConfigPath:
 
 
 class TestNosyncConfig:
-    """Tests for nosync configuration section."""
+    """Tests for the nosync configuration section."""
 
     def test_default_nosync_auto_repair(self) -> None:
         config = CleanupConfig()
@@ -344,7 +370,7 @@ class TestWatchDirectories:
 
     def test_default_watch_directories_exist(self) -> None:
         """Test default watch directories detection."""
-        # This test may pass or fail depending on system state
+        # This test may pass or fail depending on the system state
         # The important thing is it doesn't crash
         config = CleanupConfig()
         config.watch_directories = CleanupConfig._get_default_watch_directories()
@@ -352,8 +378,8 @@ class TestWatchDirectories:
         assert isinstance(config.watch_directories, list)
 
     def test_empty_watch_directories_if_no_icloud(self) -> None:
-        """Test that method doesn't crash when iCloud directories don't exist."""
-        # The method returns empty list if icloud_base doesn't exist
-        # This depends on actual system state, just ensure no crash
+        """Test that the method doesn't crash when iCloud directories don't exist."""
+        # The method returns an empty list if icloud_base doesn't exist
+        # This depends on the actual system state, just ensure no crash
         dirs = CleanupConfig._get_default_watch_directories()
         assert isinstance(dirs, list)

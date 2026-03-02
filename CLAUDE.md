@@ -146,6 +146,8 @@ Default config location: `~/Library/Application Support/icloud-cleanup/config.ya
 
 Key settings:
 - `watch_directories`: Directories to monitor (default: iCloud Drive)
+- `scan_interval`: Seconds between full safety-net scans (default: 300)
+- `guardian_interval_cycles`: Run symlink guardian every Nth scan cycle (default: 5)
 - `wait_before_delete`: Seconds to wait before deleting (default: 180)
 - `recovery.enabled`: Move to trash instead of delete (default: true)
 - `recovery.retention_days`: Days to keep deleted files (default: 7)

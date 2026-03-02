@@ -66,6 +66,7 @@ class ICloudCleanupDaemon:
         # State
         self.stats = DaemonStats(start_time=datetime.now())
         self._running = False
+        self._guardian_cycle_count: int = 0
         self._pending_deletes: dict[Path, tuple[float, DetectedFile | None]] = {}
         self._failed_deletes: dict[Path, tuple[int, float]] = {}  # (count, timestamp)
 
@@ -291,8 +292,13 @@ class ICloudCleanupDaemon:
         """Scan all directories using all modules and queue files for deletion."""
         current_time = asyncio.get_running_loop().time()
 
-        # Symlink guardian: repair broken .nosync symlinks before module scan
-        if self.config.nosync_auto_repair:
+        # Symlink guardian: run every Nth cycle to reduce IO
+        run_guardian = (
+            self.config.nosync_auto_repair and self._guardian_cycle_count % self.config.guardian_interval_cycles == 0
+        )
+        self._guardian_cycle_count += 1
+
+        if run_guardian:
             for directory in self.config.watch_directories:
                 self._run_symlink_guardian(directory)
 
@@ -341,6 +347,24 @@ class ICloudCleanupDaemon:
 
         return results
 
+    async def _drain_watcher_events(self) -> None:
+        """Block on the watcher queue until scan_interval expires, processing events instantly."""
+        try:
+            async with asyncio.timeout(self.config.scan_interval):
+                while self._running:
+                    path, detected = await self.watcher.get_pending()
+                    if path not in self._pending_deletes:
+                        self._pending_deletes[path] = (
+                            asyncio.get_running_loop().time(),
+                            detected,
+                        )
+                        self.stats.files_detected += 1
+                        label = f"[{detected.module_name}]" if detected else "conflict"
+                        self.logger.info("Detected %s: %s", label, path.name)
+                    await self._process_pending_deletes()
+        except TimeoutError:
+            pass
+
     async def run_daemon(self) -> None:
         """Run the daemon continuously."""
         self._running = True
@@ -348,8 +372,8 @@ class ICloudCleanupDaemon:
 
         # Set up signal handlers
         loop = asyncio.get_running_loop()
-        for sig in (signal.SIGTERM, signal.SIGINT):
-            loop.add_signal_handler(sig, self._handle_shutdown)
+        loop.add_signal_handler(signal.SIGTERM, self._handle_shutdown)
+        loop.add_signal_handler(signal.SIGINT, self._handle_shutdown)
 
         # Start file watcher
         self.watcher.start()
@@ -359,27 +383,13 @@ class ICloudCleanupDaemon:
 
         try:
             while self._running:
-                # Process any pending deletes
                 await self._process_pending_deletes()
+                await self._drain_watcher_events()
 
-                # Check for new files from the watcher
-                while True:
-                    try:
-                        async with asyncio.timeout(0.1):
-                            path, detected = await self.watcher.get_pending()
-                    except TimeoutError:
-                        break
-                    if path not in self._pending_deletes:
-                        self._pending_deletes[path] = (asyncio.get_running_loop().time(), detected)
-                        self.stats.files_detected += 1
-                        label = f"[{detected.module_name}]" if detected else "conflict"
-                        self.logger.info("Detected %s: %s", label, path.name)
+                if not self._running:
+                    break
 
-                # Periodic full scan
-                await asyncio.sleep(self.config.scan_interval)
                 self._scan_and_queue()
-
-                # Periodic recovery cleanup
                 self.cleaner.cleanup_recovery_dir()
 
         except asyncio.CancelledError:
