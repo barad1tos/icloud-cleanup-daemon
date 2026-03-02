@@ -173,6 +173,10 @@ class TestCleanupModuleProtocol:
             def scan_all() -> list[DetectedFile]:
                 return []
 
+            @staticmethod
+            def can_match(_name: str) -> bool:
+                return True
+
         instance = ConformingModule()
         assert isinstance(instance, CleanupModule)
 
@@ -234,6 +238,29 @@ class TestCleanupModuleProtocol:
         assert not isinstance("a string", CleanupModule)
         assert not isinstance(42, CleanupModule)
         assert not isinstance([], CleanupModule)
+
+    def test_missing_can_match_fails_isinstance(self) -> None:
+        """Test that a class missing can_match does not satisfy the protocol."""
+
+        class MissingCanMatch:
+            MODULE_ENABLED: bool = True
+            name: str = "no_can_match"
+            supports_watch: bool = True
+
+            @staticmethod
+            def is_target(_path: Path) -> DetectedFile | None:
+                return None
+
+            @staticmethod
+            def scan_directory(_directory: Path) -> list[DetectedFile]:
+                return []
+
+            @staticmethod
+            def scan_all() -> list[DetectedFile]:
+                return []
+
+        instance = MissingCanMatch()
+        assert not isinstance(instance, CleanupModule)
 
 
 class TestMinimalMockModule:
@@ -305,6 +332,20 @@ class TestMinimalMockModule:
         assert module.supports_watch is True
 
 
+class TestCanMatch:
+    """Tests for can_match string pre-filter on the mock module."""
+
+    def test_mock_can_match_positive(self) -> None:
+        """Test that can_match returns True for matching names."""
+        module = _MockCleanupModule()
+        assert module.can_match("file.tmp") is True
+
+    def test_mock_can_match_negative(self) -> None:
+        """Test that can_match returns False for non-matching names."""
+        module = _MockCleanupModule()
+        assert module.can_match("file.txt") is False
+
+
 class _MockCleanupModule:
     """Minimal CleanupModule implementation for testing protocol conformance.
 
@@ -342,3 +383,6 @@ class _MockCleanupModule:
         for directory in self._watch_directories:
             all_detected.extend(self.scan_directory(directory))
         return all_detected
+
+    def can_match(self, name: str) -> bool:
+        return name.endswith(".tmp")

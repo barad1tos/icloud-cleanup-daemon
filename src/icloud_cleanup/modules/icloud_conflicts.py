@@ -47,13 +47,17 @@ class ICloudConflictsModule:
         self.config = config
         self._pattern = re.compile(config.conflict_pattern)
 
+    def can_match(self, name: str) -> bool:
+        """Check if a filename could be a conflict (regex only, no I/O)."""
+        return self._pattern.match(name) is not None
+
     def _match_conflict(self, path: Path) -> ConflictFile | None:
         """Match a path against the conflict pattern."""
-        if not path.is_file():
-            return None
-
         match = self._pattern.match(path.name)
         if not match:
+            return None
+
+        if not path.is_file():
             return None
 
         original_name = match.group(1).rstrip()

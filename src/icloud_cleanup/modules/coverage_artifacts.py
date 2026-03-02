@@ -32,6 +32,10 @@ class CoverageArtifactsModule:
     def __init__(self, config: CleanupConfig) -> None:
         self.config = config
 
+    def can_match(self, name: str) -> bool:
+        """Check if a filename could be a coverage artifact (regex only, no I/O)."""
+        return _PATTERN.match(name) is not None
+
     def is_target(self, path: Path) -> DetectedFile | None:
         """Check if a file is a stale coverage artifact.
 
@@ -40,10 +44,10 @@ class CoverageArtifactsModule:
         2. A merged .coverage file exists in the same directory
 
         """
-        if not path.is_file():
+        if not _PATTERN.match(path.name):
             return None
 
-        if not _PATTERN.match(path.name):
+        if not path.is_file():
             return None
 
         merged = path.parent / ".coverage"

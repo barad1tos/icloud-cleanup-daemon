@@ -44,7 +44,7 @@ src/icloud_cleanup/
 **Data flow:**
 1. `discover_modules(config)` auto-discovers all enabled `CleanupModule` implementations
 2. Each module's `scan_all()` finds files to clean — returns `DetectedFile` objects
-3. `FileWatcher` monitors directories in real-time; modules with `supports_watch=True` get checked on events
+3. `FileWatcher` buffers FSEvents paths in a Lock-protected set (zero I/O in watchdog thread); daemon drains every `watcher_drain_interval` seconds
 4. `ICloudStatusChecker` waits for iCloud sync (only for files with `recovery_enabled=True`)
 5. `Cleaner.delete_detected()` handles deletion — recovery or direct unlink per `DetectedFile.recovery_enabled`
 6. `NosyncManager.verify_and_repair()` auto-repairs broken symlinks for valuable `.nosync` dirs (daemon runs this each scan cycle when `nosync.auto_repair` is enabled)
@@ -52,6 +52,7 @@ src/icloud_cleanup/
 ### Module System
 
 Each cleanup module implements `CleanupModule` Protocol from `modules/base.py`:
+- `can_match(name)` — fast string-only pre-filter (no I/O), called before `is_target()` in watcher drain loop
 - `is_target(path)` — check a single file, return `DetectedFile` or `None`
 - `scan_directory(directory)` — scan one directory
 - `scan_all()` — scan all configured watch directories
@@ -138,7 +139,7 @@ When modifying this codebase, watch out for:
 
 8. **IDE warnings are action items**: When the user shares IDE diagnostics, LanguageTool warnings, or any code quality feedback — always fix them immediately. Do not dismiss them as cosmetic or non-blocking. The project maintains clean grammar in docstrings and comments, including proper use of articles (`a`, `an`, `the`) in English text.
 
-9. **EDEADLK in iCloud paths**: `path.is_file()`, `path.exists()`, and `rglob()` can raise `OSError(errno.EDEADLK)` when iCloud can't stat files inside `.nosync` dirs. Always wrap these calls with `except OSError` and check `exc.errno == errno.EDEADLK` — log and skip, never crash. Both `scan_directory` (inner + outer) and `watcher._check_path` need this protection.
+9. **EDEADLK in iCloud paths**: `path.is_file()`, `path.exists()`, and `rglob()` can raise `OSError(errno.EDEADLK)` when iCloud can't stat files inside `.nosync` dirs. Always wrap these calls with `except OSError` and check `exc.errno == errno.EDEADLK` — log and skip, never crash. Both `scan_directory` (inner + outer) and `daemon._check_and_enqueue` need this protection.
 
 ## Configuration
 
@@ -155,6 +156,8 @@ Key settings:
 - `nosync.auto_repair`: Auto-repair broken nosync symlinks in daemon (default: true)
 - `nosync.valuable_patterns`: Extra patterns for valuable dirs (default: empty)
 - `nosync.ephemeral_patterns`: Extra patterns for ephemeral dirs (default: empty, also used by `--cleanup`)
+- `watcher_drain_interval`: Seconds between watcher buffer drains (default: 1.0)
+- `watcher_batch_size`: Max paths per processing chunk (default: 50)
 
 ## Git Workflow
 

@@ -54,6 +54,8 @@ class CleanupConfig:
     # Daemon settings
     scan_interval: int = 300  # FSEvents handles real-time; full scan is a safety net
     guardian_interval_cycles: int = 5  # Run symlink guardian every Nth scan cycle
+    watcher_drain_interval: float = 1.0  # Seconds between watcher buffer drains
+    watcher_batch_size: int = 50  # Max paths per processing chunk
     max_delete_retries: int = 3  # Max attempts to delete a file before cooldown
     retry_cooldown: int = 3600  # Seconds to wait after max retries before trying again
 
@@ -111,6 +113,8 @@ class CleanupConfig:
         config.max_icloud_wait = int(data.get("max_icloud_wait", config.max_icloud_wait))
         config.scan_interval = int(data.get("scan_interval", config.scan_interval))
         config.guardian_interval_cycles = int(data.get("guardian_interval_cycles", config.guardian_interval_cycles))
+        config.watcher_drain_interval = float(data.get("watcher_drain_interval", config.watcher_drain_interval))
+        config.watcher_batch_size = int(data.get("watcher_batch_size", config.watcher_batch_size))
 
         # Nested sections
         cls._apply_recovery_config(config, data.get("recovery", {}))
@@ -136,6 +140,12 @@ class CleanupConfig:
             raise ValueError(msg)
         if config.guardian_interval_cycles <= 0:
             msg = f"guardian_interval_cycles must be positive, got {config.guardian_interval_cycles}"
+            raise ValueError(msg)
+        if config.watcher_drain_interval <= 0:
+            msg = f"watcher_drain_interval must be positive, got {config.watcher_drain_interval}"
+            raise ValueError(msg)
+        if config.watcher_batch_size <= 0:
+            msg = f"watcher_batch_size must be positive, got {config.watcher_batch_size}"
             raise ValueError(msg)
 
     @classmethod
@@ -203,6 +213,8 @@ class CleanupConfig:
             "max_icloud_wait": self.max_icloud_wait,
             "scan_interval": self.scan_interval,
             "guardian_interval_cycles": self.guardian_interval_cycles,
+            "watcher_drain_interval": self.watcher_drain_interval,
+            "watcher_batch_size": self.watcher_batch_size,
             "recovery": {
                 "enabled": self.enable_recovery,
                 "directory": str(self.recovery_dir),

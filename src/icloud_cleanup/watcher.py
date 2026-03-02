@@ -1,18 +1,14 @@
-"""File system watcher for iCloud conflict files using FSEvents."""
+"""File system watcher for iCloud Drive using FSEvents."""
 
 from __future__ import annotations
 
-import asyncio
-import errno
 import logging
-from collections.abc import Callable
+import threading
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from watchdog.events import FileCreatedEvent, FileMovedEvent, FileSystemEventHandler
 from watchdog.observers import Observer
-
-from .modules.base import DetectedFile
 
 # watchdog.observers.Observer is a dynamic ObserverType, not valid in type annotations
 _ObserverType = Any
@@ -21,107 +17,63 @@ if TYPE_CHECKING:
     from watchdog.events import FileSystemEvent
 
     from .config import CleanupConfig
-    from .detector import ConflictDetector
-    from .modules.base import CleanupModule
 
 
 class ConflictEventHandler(FileSystemEventHandler):
-    """Handles file system events for conflict detection."""
+    """Zero-I/O handler: enqueues raw paths without stat() calls."""
 
     def __init__(
         self,
-        detector: ConflictDetector,
-        callback: Callable[[Path, DetectedFile | None], None],
+        watcher: FileWatcher,
         logger: logging.Logger,
-        modules: list[CleanupModule] | None = None,
     ) -> None:
-        """Wire up the detector, callback, and optional watch-capable modules."""
         super().__init__()
-        self.detector = detector
-        self.callback = callback
+        self._watcher = watcher
         self.logger = logger
-        self._watch_modules = [m for m in (modules or []) if m.supports_watch]
 
     def on_created(self, event: FileSystemEvent) -> None:
-        """Filter for non-directory creation events and check the path."""
+        """Enqueue the source path of non-directory creation events."""
         if isinstance(event, FileCreatedEvent) and not event.is_directory:
             src_path = event.src_path if isinstance(event.src_path, str) else event.src_path.decode()
-            self._check_path(Path(src_path))
+            self._watcher.enqueue_path(Path(src_path))
 
     def on_moved(self, event: FileSystemEvent) -> None:
-        """Check the destination of non-directory move events (iCloud often renames via move)."""
+        """Enqueue the destination path of non-directory move events."""
         if isinstance(event, FileMovedEvent) and not event.is_directory:
             dest_path = event.dest_path if isinstance(event.dest_path, str) else event.dest_path.decode()
-            self._check_path(Path(dest_path))
-
-    def _check_path(self, path: Path) -> None:
-        """Check if the path matches any watch-capable module.
-
-        Iterates all watch-capable modules first, then falls back to the
-        legacy detector. The first match wins. DetectedFile context is
-        passed through the callback, so the daemon preserves module info.
-
-        Args:
-            path: Path to check.
-
-        """
-        for module in self._watch_modules:
-            try:
-                detected = module.is_target(path)
-            except OSError as exc:
-                if exc.errno == errno.EDEADLK:
-                    self.logger.debug("EDEADLK (iCloud transient) in watcher — skipping: %s", path)
-                    return
-                raise
-            if detected:
-                self.logger.debug("Detected [%s]: %s", detected.module_name, path.name)
-                self.callback(path, detected)
-                return
-
-        # Legacy detector fallback — wrap in a DetectedFile for the unified pipeline
-        try:
-            is_conflict = self.detector.is_conflict_file(path)
-        except OSError as exc:
-            if exc.errno == errno.EDEADLK:
-                self.logger.debug("EDEADLK (iCloud transient) in watcher — skipping: %s", path)
-                return
-            raise
-        if is_conflict:
-            detected = DetectedFile(
-                path=path,
-                module_name="icloud_conflicts",
-                reason="iCloud conflict (legacy detector)",
-                recovery_enabled=True,
-            )
-            self.logger.debug("Detected [legacy]: %s", path.name)
-            self.callback(path, detected)
+            self._watcher.enqueue_path(Path(dest_path))
 
 
 class FileWatcher:
-    """Watches directories for iCloud conflict files using FSEvents."""
+    """Watches directories using FSEvents with zero-I/O buffering.
+
+    Paths are collected in a Lock-protected set for deduplication.
+    The daemon drains the set periodically via drain_paths().
+    """
 
     def __init__(
         self,
         config: CleanupConfig,
-        detector: ConflictDetector,
         logger: logging.Logger,
-        modules: list[CleanupModule] | None = None,
     ) -> None:
-        """Set up the observer, queue, and module list for directory watching."""
         self.config = config
-        self.detector = detector
         self.logger = logger
-        self._modules = modules or []
         self._observer: _ObserverType | None = None
-        self._pending_queue: asyncio.Queue[tuple[Path, DetectedFile | None]] = asyncio.Queue()
+        self._lock = threading.Lock()
+        self._paths: set[Path] = set()
         self._running = False
 
-    def _on_file_detected(self, path: Path, detected: DetectedFile | None) -> None:
-        """Enqueue a detected file for async processing by the daemon."""
-        try:
-            self._pending_queue.put_nowait((path, detected))
-        except asyncio.QueueFull:
-            self.logger.warning("Watch queue full, dropping: %s", path.name)
+    def enqueue_path(self, path: Path) -> None:
+        """Add a path to the buffer (called from watchdog thread)."""
+        with self._lock:
+            self._paths.add(path)
+
+    def drain_paths(self) -> set[Path]:
+        """Atomically swap the buffer and return all buffered paths."""
+        with self._lock:
+            paths = self._paths
+            self._paths = set()
+        return paths
 
     def start(self) -> None:
         """Start watching configured directories."""
@@ -129,12 +81,7 @@ class FileWatcher:
             return
 
         self._observer = Observer()
-        handler = ConflictEventHandler(
-            self.detector,
-            self._on_file_detected,
-            self.logger,
-            modules=self._modules,
-        )
+        handler = ConflictEventHandler(self, self.logger)
 
         for directory in self.config.watch_directories:
             if directory.exists():
@@ -159,28 +106,3 @@ class FileWatcher:
     @property
     def is_running(self) -> bool:
         return self._running
-
-    async def get_pending(self) -> tuple[Path, DetectedFile | None]:
-        """Get a pending detected file from the queue.
-
-        Returns:
-            Tuple of the path, and DetectedFile or None for legacy matches.
-
-        """
-        return await self._pending_queue.get()
-
-    def clear_pending(self) -> int:
-        """Clear all pending items.
-
-        Returns:
-            Number of items cleared.
-
-        """
-        count = 0
-        while not self._pending_queue.empty():
-            try:
-                self._pending_queue.get_nowait()
-                count += 1
-            except asyncio.QueueEmpty:
-                break
-        return count

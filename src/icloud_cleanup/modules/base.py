@@ -25,6 +25,21 @@ class CleanupModule(Protocol):
     name: str
     supports_watch: bool
 
+    def can_match(self, name: str) -> bool:
+        """Fast string-only pre-filter: could this filename be a target?
+
+        Called before is_target() to skip expensive stat() calls on
+        obvious non-matches. Must NOT perform any I/O.
+
+        Args:
+            name: Filename (not full path) to check.
+
+        Returns:
+            True if the name could be a target, False to skip.
+
+        """
+        ...
+
     def is_target(self, path: Path) -> DetectedFile | None:
         """Check if a single file is a target for this module.
 

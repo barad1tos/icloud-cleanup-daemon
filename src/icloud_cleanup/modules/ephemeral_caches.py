@@ -10,7 +10,7 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from ..nosync import NOSYNC_SUFFIX, NosyncManager
+from ..nosync import EPHEMERAL_PATTERNS, NOSYNC_SUFFIX, NosyncManager
 from .base import DetectedFile
 
 if TYPE_CHECKING:
@@ -30,6 +30,14 @@ class EphemeralCachesModule:
         self.config = config
         self._extra_patterns: frozenset[str] = frozenset(config.nosync_ephemeral_patterns)
 
+    def can_match(self, name: str) -> bool:
+        """Check if a name could be an ephemeral cache (string only, no I/O)."""
+        if name.endswith(NOSYNC_SUFFIX):
+            return False
+        if NosyncManager.matches_patterns(name, EPHEMERAL_PATTERNS):
+            return True
+        return bool(self._extra_patterns and NosyncManager.matches_patterns(name, self._extra_patterns))
+
     def is_target(self, path: Path) -> DetectedFile | None:
         """Check if a path is an ephemeral cache directory.
 
@@ -37,25 +45,27 @@ class EphemeralCachesModule:
         ephemeral pattern (built-in or user-configured) and does not
         already have a .nosync suffix.
         """
-        if NosyncManager.is_ephemeral_candidate(path):
+        name = path.name
+        if name.endswith(NOSYNC_SUFFIX):
+            return None
+
+        if NosyncManager.matches_patterns(name, EPHEMERAL_PATTERNS):
+            if not path.is_dir():
+                return None
             return DetectedFile(
                 path=path,
                 module_name=self.name,
-                reason=f"Ephemeral cache directory: {path.name}",
+                reason=f"Ephemeral cache directory: {name}",
                 recovery_enabled=False,
             )
 
-        # Check user-configured extra patterns
-        if (
-            self._extra_patterns
-            and path.is_dir()
-            and not path.name.endswith(NOSYNC_SUFFIX)
-            and NosyncManager.matches_patterns(path.name, self._extra_patterns)
-        ):
+        if self._extra_patterns and NosyncManager.matches_patterns(name, self._extra_patterns):
+            if not path.is_dir():
+                return None
             return DetectedFile(
                 path=path,
                 module_name=self.name,
-                reason=f"Ephemeral cache directory (custom pattern): {path.name}",
+                reason=f"Ephemeral cache directory (custom pattern): {name}",
                 recovery_enabled=False,
             )
 

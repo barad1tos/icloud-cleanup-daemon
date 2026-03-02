@@ -64,6 +64,8 @@ class TestCleanupConfigDefaults:
         assert config.log_level == "INFO"
         assert config.scan_interval == 300
         assert config.guardian_interval_cycles == 5
+        assert config.watcher_drain_interval == 1.0
+        assert config.watcher_batch_size == 50
 
     def test_default_conflict_pattern(self) -> None:
         """Test the default conflict pattern matches expected files."""
@@ -383,3 +385,57 @@ class TestWatchDirectories:
         # This depends on the actual system state, just ensure no crash
         dirs = CleanupConfig._get_default_watch_directories()
         assert isinstance(dirs, list)
+
+
+class TestWatcherConfig:
+    """Tests for watcher drain configuration."""
+
+    def test_default_drain_interval(self) -> None:
+        """Test the default watcher drain interval."""
+        config = CleanupConfig()
+        assert config.watcher_drain_interval == 1.0
+
+    def test_default_batch_size(self) -> None:
+        """Test the default watcher batch size."""
+        config = CleanupConfig()
+        assert config.watcher_batch_size == 50
+
+    def test_load_drain_interval_from_yaml(self, tmp_path: Path) -> None:
+        """Test that watcher_drain_interval loads from YAML."""
+        config_file = tmp_path / "config.yaml"
+        config_file.write_text("watcher_drain_interval: 2.5\n")
+        config = CleanupConfig.load(config_file)
+        assert config.watcher_drain_interval == 2.5
+
+    def test_load_batch_size_from_yaml(self, tmp_path: Path) -> None:
+        """Test that watcher_batch_size loads from YAML."""
+        config_file = tmp_path / "config.yaml"
+        config_file.write_text("watcher_batch_size: 100\n")
+        config = CleanupConfig.load(config_file)
+        assert config.watcher_batch_size == 100
+
+    def test_zero_drain_interval_raises(self, tmp_path: Path) -> None:
+        """Test that a zero drain interval raises ValueError."""
+        config_file = tmp_path / "config.yaml"
+        config_file.write_text("watcher_drain_interval: 0\n")
+        with pytest.raises(ValueError, match="watcher_drain_interval must be positive"):
+            CleanupConfig.load(config_file)
+
+    def test_zero_batch_size_raises(self, tmp_path: Path) -> None:
+        """Test that a zero batch size raises ValueError."""
+        config_file = tmp_path / "config.yaml"
+        config_file.write_text("watcher_batch_size: 0\n")
+        with pytest.raises(ValueError, match="watcher_batch_size must be positive"):
+            CleanupConfig.load(config_file)
+
+    def test_drain_interval_roundtrip(self, tmp_path: Path) -> None:
+        """Test that watcher settings survive save/load roundtrip."""
+        config = CleanupConfig()
+        config.watcher_drain_interval = 2.0
+        config.watcher_batch_size = 75
+        config_file = tmp_path / "config.yaml"
+        config.save(config_file)
+
+        loaded = CleanupConfig.load(config_file)
+        assert loaded.watcher_drain_interval == 2.0
+        assert loaded.watcher_batch_size == 75

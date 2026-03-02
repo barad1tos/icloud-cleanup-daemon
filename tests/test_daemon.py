@@ -506,3 +506,118 @@ class TestEDEADLKRetry:
         assert failure_count == 1
         assert timestamp == 50.0
         assert daemon.stats.errors == 0
+
+
+class TestWatcherBatchProcessing:
+    """Tests for _process_watcher_batch and _check_and_enqueue."""
+
+    @pytest.mark.asyncio
+    async def test_check_and_enqueue_detects_conflict(self, tmp_path: Path) -> None:
+        """Verify that can_match + is_target pipeline queues matching files."""
+        config = CleanupConfig()
+        config.watch_directories = [tmp_path]
+        config.log_file = tmp_path / "test.log"
+        config.recovery_dir = tmp_path / "recovery"
+        daemon = ICloudCleanupDaemon(config)
+
+        original = tmp_path / "document.txt"
+        original.touch()
+        conflict = tmp_path / "document 2.txt"
+        conflict.touch()
+
+        daemon._check_and_enqueue(conflict)
+
+        assert conflict in daemon._pending_deletes
+
+    @pytest.mark.asyncio
+    async def test_check_and_enqueue_skips_non_matching(self, tmp_path: Path) -> None:
+        """Verify that non-matching names are not queued."""
+        config = CleanupConfig()
+        config.watch_directories = [tmp_path]
+        config.log_file = tmp_path / "test.log"
+        config.recovery_dir = tmp_path / "recovery"
+        daemon = ICloudCleanupDaemon(config)
+
+        regular = tmp_path / "document.txt"
+        regular.touch()
+
+        daemon._check_and_enqueue(regular)
+
+        assert regular not in daemon._pending_deletes
+
+    @pytest.mark.asyncio
+    async def test_check_and_enqueue_skips_already_pending(self, tmp_path: Path) -> None:
+        """Verify that paths already in _pending_deletes are skipped."""
+        config = CleanupConfig()
+        config.watch_directories = [tmp_path]
+        config.log_file = tmp_path / "test.log"
+        config.recovery_dir = tmp_path / "recovery"
+        daemon = ICloudCleanupDaemon(config)
+
+        original = tmp_path / "document.txt"
+        original.touch()
+        conflict = tmp_path / "document 2.txt"
+        conflict.touch()
+
+        # Pre-populate pending
+        daemon._pending_deletes[conflict] = (100.0, None)
+        old_count = daemon.stats.files_detected
+
+        daemon._check_and_enqueue(conflict)
+
+        # Should not increment stats
+        assert daemon.stats.files_detected == old_count
+
+    @pytest.mark.asyncio
+    async def test_process_watcher_batch(self, tmp_path: Path) -> None:
+        """Verify batch processing queues all matching files."""
+        config = CleanupConfig()
+        config.watch_directories = [tmp_path]
+        config.log_file = tmp_path / "test.log"
+        config.recovery_dir = tmp_path / "recovery"
+        config.watcher_batch_size = 2
+        daemon = ICloudCleanupDaemon(config)
+
+        conflicts = []
+        for i in range(5):
+            orig = tmp_path / f"doc{i}.txt"
+            orig.touch()
+            conflict = tmp_path / f"doc{i} 2.txt"
+            conflict.touch()
+            conflicts.append(conflict)
+
+        await daemon._process_watcher_batch(set(conflicts))
+
+        for conflict in conflicts:
+            assert conflict in daemon._pending_deletes
+
+    @pytest.mark.asyncio
+    async def test_check_and_enqueue_handles_edeadlk(self, tmp_path: Path) -> None:
+        """Verify that EDEADLK during is_target is caught and skipped."""
+        import errno as errno_mod
+
+        config = CleanupConfig()
+        config.watch_directories = [tmp_path]
+        config.log_file = tmp_path / "test.log"
+        config.recovery_dir = tmp_path / "recovery"
+        daemon = ICloudCleanupDaemon(config)
+
+        conflict = tmp_path / "document 2.txt"
+        conflict.touch()
+        original = tmp_path / "document.txt"
+        original.touch()
+
+        # Patch is_target to raise EDEADLK
+        for module in daemon._watch_modules:
+            if module.name == "icloud_conflicts":
+                from unittest.mock import patch as mock_patch
+
+                with mock_patch.object(
+                    module,
+                    "is_target",
+                    side_effect=OSError(errno_mod.EDEADLK, "Resource deadlock avoided"),
+                ):
+                    daemon._check_and_enqueue(conflict)
+                break
+
+        assert conflict not in daemon._pending_deletes
