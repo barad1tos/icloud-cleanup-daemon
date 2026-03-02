@@ -1,0 +1,5 @@
+# .sourcery.yaml - Sourcery AI code review configuration
+# https://docs.sourcery.ai/Code-Review/Configuration/
+
+ignore:
+  - docs/**
