@@ -45,7 +45,7 @@ jobs:
           python-version: '3.13'
 
       - name: Install dependencies
-        run: uv sync
+        run: uv sync --extra dev
 
       - name: Lint check
         run: uv run ruff check src/ tests/
@@ -74,7 +74,7 @@ jobs:
           python-version: '3.13'
 
       - name: Install dependencies
-        run: uv sync
+        run: uv sync --extra dev
 
       - name: Run tests
         run: uv run pytest tests/ -v -x
