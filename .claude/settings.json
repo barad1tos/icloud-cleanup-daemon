@@ -2,27 +2,7 @@
   "$schema": "https://json.schemastore.org/claude-code-settings.json",
   "permissions": {
     "allow": [
-      "Bash(./gradlew:*)",
-      "Bash(cargo build:*)",
-      "Bash(cargo clippy:*)",
-      "Bash(cargo run:*)",
-      "Bash(cargo test:*)",
-      "Bash(docker build:*)",
-      "Bash(docker images:*)",
-      "Bash(docker logs:*)",
-      "Bash(docker ps:*)",
-      "Bash(docker push:*)",
-      "Bash(go build:*)",
-      "Bash(go mod:*)",
-      "Bash(go run:*)",
-      "Bash(go test:*)",
-      "Bash(gradle:*)",
-      "Bash(make:*)",
-      "Bash(npm:*)",
-      "Bash(npx:*)",
-      "Bash(pnpm:*)",
-      "Bash(pytest:*)",
-      "Bash(yarn:*)"
+      "Bash(npx:*)"
     ]
   }
 }
